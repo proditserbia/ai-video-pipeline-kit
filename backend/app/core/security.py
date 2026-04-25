@@ -26,12 +26,22 @@ def validate_password_length(password: str) -> None:
         )
 
 
-def hash_password(password: str) -> str:
+def hash_password(password: str | bytes) -> str:
+    if isinstance(password, bytes):
+        password = password.decode("utf-8", errors="replace")
     validate_password_length(password)
-    return pwd_context.hash(password)
+    hashed = pwd_context.hash(password)
+    # passlib 1.7.x / bcrypt 4.x may surface bytes in some edge cases
+    if isinstance(hashed, bytes):
+        hashed = hashed.decode("utf-8")
+    return hashed
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def verify_password(plain: str | bytes, hashed: str | bytes) -> bool:
+    if isinstance(plain, bytes):
+        plain = plain.decode("utf-8", errors="replace")
+    if isinstance(hashed, bytes):
+        hashed = hashed.decode("utf-8")
     return pwd_context.verify(plain, hashed)
 
 
@@ -40,7 +50,11 @@ def create_access_token(subject: str | int, expires_delta: timedelta | None = No
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     payload = {"sub": str(subject), "exp": expire}
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    # python-jose may return bytes with certain backends/versions
+    if isinstance(encoded, bytes):
+        encoded = encoded.decode("utf-8")
+    return encoded
 
 
 def decode_access_token(token: str) -> dict:
