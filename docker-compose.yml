@@ -1,0 +1,102 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aivideo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aivideo_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-aivideo}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aivideo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aivideo
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - aivideo
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-change_me_in_production_min_32_chars_!!}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123!}
+      - STORAGE_PATH=/storage
+    volumes:
+      - storage_data:/storage
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+    networks:
+      - aivideo
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-change_me_in_production_min_32_chars_!!}
+      - STORAGE_PATH=/storage
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-void}
+    volumes:
+      - storage_data:/storage
+    restart: unless-stopped
+    networks:
+      - aivideo
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      - backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    restart: unless-stopped
+    networks:
+      - aivideo
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
+
+networks:
+  aivideo:
+    driver: bridge

@@ -1,0 +1,51 @@
+{
+  "_comment": "FULL CONTROL mode — every pipeline stage explicitly configured.",
+  "mode": "full_control",
+  "title": "Docker in 5 Minutes — Full Tutorial",
+  "project_id": null,
+  "script": {
+    "text": "Welcome back. Today I will show you exactly how to set up Docker in five minutes. Step one: install Docker Desktop from the official website. Step two: verify the installation by running docker dash dash version in your terminal. Step three: run your first container with docker run hello dash world. And that is it. You now have Docker running locally. Follow for more dev tips every day.",
+    "duration_seconds": 90,
+    "target_platform": "youtube",
+    "language": "en"
+  },
+  "voice": {
+    "provider": "edge_tts",
+    "voice_id": "en-US-JennyNeural",
+    "rate": "+0%",
+    "pitch": "+0Hz",
+    "volume": "+0%"
+  },
+  "caption": {
+    "enabled": true,
+    "style": "basic",
+    "language": null,
+    "max_line_width": 40
+  },
+  "video": {
+    "resolution": "1080x1920",
+    "background_music": true,
+    "background_music_volume": 0.1,
+    "watermark": false,
+    "stock_query": "programming laptop desk setup",
+    "stock_provider": null,
+    "thumbnail": true,
+    "codec": "h264",
+    "fps": 30
+  },
+  "upload": {
+    "destinations": ["local"],
+    "title_override": null,
+    "description_override": null,
+    "tags": ["docker", "devtips", "programming", "tutorial"],
+    "privacy": "private",
+    "dry_run": false
+  },
+  "dry_run": false,
+  "max_retries": 3,
+  "priority": 5,
+  "metadata": {
+    "series": "dev-quickstarts",
+    "episode": 1
+  }
+}

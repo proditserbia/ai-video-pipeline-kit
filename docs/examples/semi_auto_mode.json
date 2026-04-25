@@ -1,0 +1,27 @@
+{
+  "_comment": "SEMI-AUTO mode — topic plus selective overrides for voice and captions.",
+  "mode": "semi_auto",
+  "title": "Why You Need a Standing Desk",
+  "project_id": null,
+  "script": {
+    "topic": "Why you need a standing desk and how it improves health and productivity",
+    "tone": "conversational",
+    "duration_seconds": 45,
+    "target_platform": "instagram",
+    "language": "en"
+  },
+  "voice": {
+    "provider": "edge_tts",
+    "voice_id": "en-US-GuyNeural",
+    "rate": "+8%",
+    "pitch": "+0Hz",
+    "volume": "+0%"
+  },
+  "caption": {
+    "enabled": true,
+    "style": "bold",
+    "max_line_width": 40
+  },
+  "dry_run": false,
+  "max_retries": 3
+}
