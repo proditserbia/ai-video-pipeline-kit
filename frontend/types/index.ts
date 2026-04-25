@@ -74,9 +74,12 @@ export type AssetType = 'video' | 'audio' | 'image' | 'script' | 'other'
 export interface Asset {
   id: number
   project_id?: number | null
+  name: string
   filename: string
   file_path: string
   file_type: string
+  asset_type: AssetType
+  file_size: number
   mime_type?: string | null
   source: string
   created_at: string

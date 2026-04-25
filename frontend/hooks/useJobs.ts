@@ -61,7 +61,7 @@ export function useCreateJob() {
 export function useRetryJob() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       const response = await api.post<Job>(`/api/v1/jobs/${id}/retry`)
       return response.data
     },
@@ -74,7 +74,7 @@ export function useRetryJob() {
 export function useCancelJob() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       const response = await api.post<Job>(`/api/v1/jobs/${id}/cancel`)
       return response.data
     },

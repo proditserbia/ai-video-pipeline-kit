@@ -38,7 +38,7 @@ export default function ProjectForm({ onSubmit, defaultValues, isLoading }: Proj
 
   useEffect(() => {
     if (defaultValues) {
-      reset({ name: defaultValues.name, description: defaultValues.description })
+      reset({ name: defaultValues.name, description: defaultValues.description ?? undefined })
     }
   }, [defaultValues, reset])
 
