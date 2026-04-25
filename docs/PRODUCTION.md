@@ -90,41 +90,34 @@ sudo apt install -y nginx certbot python3-certbot-nginx
 
 ## 4. Deploy Nginx Config
 
-The repo ships a ready-to-use config at `nginx/avpk.prodit.rs.conf`.
+The repo ships two ready-to-use config files:
+
+| Repo file | Destination |
+|---|---|
+| `nginx/http-extras.conf` | `/etc/nginx/conf.d/avpk-extras.conf` |
+| `nginx/avpk.prodit.rs.conf` | `/etc/nginx/sites-available/avpk.prodit.rs` |
+
+`http-extras.conf` must be installed first — it defines the `$connection_upgrade`
+map and rate-limit zones that the site config references.
 
 ```bash
-# Copy from the cloned repo
+# 1. Install http-context directives (WebSocket map + rate-limit zones)
+sudo cp nginx/http-extras.conf /etc/nginx/conf.d/avpk-extras.conf
+
+# 2. Install the site config
 sudo cp nginx/avpk.prodit.rs.conf /etc/nginx/sites-available/avpk.prodit.rs
 
-# Enable the site
+# 3. Enable the site
 sudo ln -s /etc/nginx/sites-available/avpk.prodit.rs \
            /etc/nginx/sites-enabled/avpk.prodit.rs
 
-# Add the WebSocket upgrade map and rate-limit zones to nginx.conf
-# (The config file contains these directives — they must live in the http block,
-#  not inside a server block.  The cleanest approach is to add a snippet:)
-sudo tee /etc/nginx/conf.d/websocket-map.conf > /dev/null <<'EOF'
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ""      close;
-}
-
-limit_req_zone $binary_remote_addr zone=api_limit:10m     rate=30r/s;
-limit_req_zone $binary_remote_addr zone=general_limit:10m rate=60r/s;
-EOF
-
-# Remove those same directives from the site config to avoid duplicates
-# (they are already defined in the snippet above)
-sudo sed -i '/^limit_req_zone/d;/^map \$http_upgrade/,/^}/d' \
-    /etc/nginx/sites-available/avpk.prodit.rs
-
-# Disable the default site
+# 4. Disable the default site
 sudo rm -f /etc/nginx/sites-enabled/default
 
-# Test config syntax
+# 5. Test config syntax
 sudo nginx -t
 
-# Start / reload Nginx
+# 6. Start / reload Nginx
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 ```
@@ -254,7 +247,9 @@ curl -I http://avpk.prodit.rs
 #           Location: https://avpk.prodit.rs/
 
 # 4. SSL certificate info
-curl -v https://avpk.prodit.rs 2>&1 | grep -E "subject:|expire"
+openssl s_client -connect avpk.prodit.rs:443 -servername avpk.prodit.rs \
+    </dev/null 2>/dev/null | openssl x509 -noout -subject -dates \
+    | grep -E "subject=|notAfter"
 
 # 5. Confirm app ports are NOT reachable from outside
 # Run from a remote machine:
@@ -311,7 +306,7 @@ Two zones are configured:
 | `api_limit` | 30 req/s (burst 50) | `/api` |
 | `general_limit` | 60 req/s (burst 100) | `/` (frontend) |
 
-Tune these values in `/etc/nginx/conf.d/websocket-map.conf` and the site config.
+Tune these values in `/etc/nginx/conf.d/avpk-extras.conf` and the site config.
 
 ### Fail2ban (optional)
 ```bash
