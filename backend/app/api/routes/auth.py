@@ -21,7 +21,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    user: "UserResponse | None" = None
+    user: "UserResponse"
 
 
 @router.post("/login", response_model=TokenResponse)

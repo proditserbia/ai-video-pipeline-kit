@@ -215,8 +215,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
         # Only retry on transient infrastructure errors (network / OS / DB IO).
         # Logic errors (missing binary, bad config, invalid script) should not
         # be retried automatically – they will fail again immediately.
+        _RETRY_COUNTDOWN_SECONDS = 60
         if isinstance(exc, (OSError, ConnectionError, TimeoutError)):
-            raise self.retry(exc=exc, countdown=60)
+            raise self.retry(exc=exc, countdown=_RETRY_COUNTDOWN_SECONDS)
         raise
 
     finally:
