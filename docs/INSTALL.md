@@ -88,28 +88,17 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-### Reverse Proxy (nginx)
+### Reverse Proxy (nginx) + SSL
 
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
+For a complete, production-ready Nginx + Let's Encrypt setup see
+**[docs/PRODUCTION.md](PRODUCTION.md)**.
 
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-    }
-
-    location /api {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-    }
-
-    location /health {
-        proxy_pass http://localhost:8000;
-    }
-}
-```
+It covers:
+- Full Nginx config with HTTP → HTTPS redirect, WebSocket support, gzip, and security headers
+- Certbot SSL certificate issuance and auto-renewal
+- UFW firewall rules (open 80/443, block 3000/8000)
+- `docker-compose.prod.yml` that binds ports to `127.0.0.1` only
+- Health-check verification commands
 
 ## Updating
 

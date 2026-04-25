@@ -1,0 +1,25 @@
+
+# Production Docker Compose — avpk.prodit.rs
+# ============================================
+# Overrides docker-compose.yml so that frontend and backend ports are bound
+# to 127.0.0.1 only.  Nginx (running on the host) reverse-proxies to them.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+services:
+  backend:
+    environment:
+      # Production API URL — used by the backend itself (CORS, redirects, etc.)
+      - BACKEND_HOST=https://avpk.prodit.rs
+    ports:
+      # Bind only to loopback — block direct public access on port 8000
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    environment:
+      # Next.js reads this at BUILD TIME — rebuild the image after changing it
+      - NEXT_PUBLIC_API_URL=https://avpk.prodit.rs/api
+    ports:
+      # Bind only to loopback — block direct public access on port 3000
+      - "127.0.0.1:3000:3000"
