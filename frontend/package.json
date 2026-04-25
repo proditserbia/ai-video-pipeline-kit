@@ -17,7 +17,7 @@
     "react-hook-form": "^7.52.0",
     "zod": "^3.23.8",
     "@hookform/resolvers": "^3.6.0",
-    "lucide-react": "^0.390.0",
+    "lucide-react": "^0.400.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.3.0",
     "date-fns": "^3.6.0"

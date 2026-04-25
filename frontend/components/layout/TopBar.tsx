@@ -14,7 +14,7 @@ export default function TopBar() {
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700">
             <User className="h-4 w-4 text-gray-400" />
           </div>
-          <span className="text-sm text-gray-300">{user?.email || user?.username || 'User'}</span>
+          <span className="text-sm text-gray-300">{user?.email || 'User'}</span>
         </div>
         <Button variant="ghost" size="sm" onClick={logout} className="text-gray-400 hover:text-white">
           <LogOut className="mr-2 h-4 w-4" />
