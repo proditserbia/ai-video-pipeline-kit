@@ -1,0 +1,12 @@
+{
+  "_comment": "DRY RUN — pipeline runs all steps but does not write final output or upload.",
+  "mode": "auto",
+  "title": "Dry Run Validation Test",
+  "script": {
+    "topic": "Test topic for pipeline validation",
+    "duration_seconds": 30,
+    "target_platform": "tiktok"
+  },
+  "dry_run": true,
+  "max_retries": 1
+}

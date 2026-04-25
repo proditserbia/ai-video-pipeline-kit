@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from app.api.routes import auth, assets, health, jobs, projects, settings, topics, webhooks
+from app.api.routes import auth, assets, headless, health, jobs, projects, settings, topics, webhooks
 from app.config import settings as app_settings
 from app.core.rate_limit import limiter
 from app.middleware.logging import LoggingMiddleware
@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(jobs.router)
+    app.include_router(headless.router)
     app.include_router(projects.router)
     app.include_router(topics.router)
     app.include_router(assets.router)
@@ -101,9 +102,19 @@ def create_app() -> FastAPI:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # Pydantic v2 errors() may contain non-JSON-serializable objects (e.g. ValueError).
+        # Stringify each error's ctx values to ensure safe serialization.
+        errors = []
+        for err in exc.errors():
+            safe_err = dict(err)
+            if "ctx" in safe_err and isinstance(safe_err["ctx"], dict):
+                safe_err["ctx"] = {
+                    k: str(v) for k, v in safe_err["ctx"].items()
+                }
+            errors.append(safe_err)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"detail": exc.errors()},
+            content={"detail": errors},
         )
 
     return app

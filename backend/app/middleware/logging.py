@@ -23,6 +23,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         )
 
         log.info("request_started")
+        response = None
         try:
             response = await call_next(request)
         except Exception as exc:

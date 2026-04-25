@@ -1,0 +1,11 @@
+{
+  "_comment": "TEMPLATE mode — render the 'quick_explainer' template with topic props.",
+  "template_id": "quick_explainer",
+  "props": {
+    "topic": "How blockchain works in plain English",
+    "tone": "educational",
+    "voice_id": "en-US-JennyNeural",
+    "target_platform": "youtube"
+  },
+  "dry_run": false
+}

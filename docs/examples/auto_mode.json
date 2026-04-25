@@ -1,0 +1,13 @@
+{
+  "_comment": "AUTO mode — only script.topic is required. The pipeline decides everything else.",
+  "mode": "auto",
+  "title": "5 Productivity Tips for Remote Workers",
+  "script": {
+    "topic": "5 productivity tips for remote workers",
+    "tone": "motivational",
+    "duration_seconds": 60,
+    "target_platform": "tiktok",
+    "language": "en"
+  },
+  "dry_run": false
+}
