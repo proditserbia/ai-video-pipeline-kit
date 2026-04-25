@@ -21,7 +21,7 @@ SITES_ENABLED="/etc/nginx/sites-enabled/${DOMAIN}"
 EXTRAS_CONF="/etc/nginx/conf.d/avpk-extras.conf"
 CERTBOT_WEBROOT="/var/www/certbot"
 
-# Colour helpers
+# Color helpers
 info()    { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
 success() { echo -e "\033[1;32m[OK]\033[0m    $*"; }
 error()   { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
