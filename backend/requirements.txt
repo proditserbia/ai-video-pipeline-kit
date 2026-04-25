@@ -15,7 +15,8 @@ pydantic-settings==2.2.1
 email-validator>=2.1.0
 python-dotenv==1.0.1
 edge-tts==6.1.12
-faster-whisper==1.0.1
+faster-whisper==1.1.1
+av==12.3.0
 Pillow==12.2.0
 pytrends==4.9.2
 praw==7.7.1
