@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import structlog
 from sqlalchemy import select
 
 from app.config import settings
 from app.core.security import hash_password, verify_password
 from app.database import _get_async_session_factory
 from app.models.user import User
+
+logger = structlog.get_logger(__name__)
 
 
 async def seed_admin_user() -> None:
@@ -17,6 +20,7 @@ async def seed_admin_user() -> None:
             if not verify_password(settings.ADMIN_PASSWORD, existing.hashed_password):
                 existing.hashed_password = hash_password(settings.ADMIN_PASSWORD)
                 await db.commit()
+                logger.info("admin_password_updated", email=settings.ADMIN_EMAIL)
             return
         admin = User(
             email=settings.ADMIN_EMAIL,
