@@ -1,28 +1,42 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import check_feature, get_current_user, get_db
 from app.models.topic import Topic, TopicStatus
 from app.models.user import User
-from app.schemas.topic import TopicDiscoverRequest, TopicResponse
+from app.schemas.topic import TopicDiscoverRequest, TopicListResponse, TopicResponse
 
-router = APIRouter(prefix="/api/topics", tags=["topics"])
+router = APIRouter(prefix="/topics", tags=["topics"])
 
 
-@router.get("", response_model=list[TopicResponse])
+@router.get("", response_model=TopicListResponse)
 async def list_topics(
     status: TopicStatus | None = None,
+    page: int = 1,
+    size: int = 50,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[TopicResponse]:
+) -> TopicListResponse:
     query = select(Topic)
+    count_query = select(func.count(Topic.id))
     if status:
         query = query.where(Topic.status == status)
-    result = await db.execute(query)
-    return [TopicResponse.model_validate(t) for t in result.scalars().all()]
+        count_query = count_query.where(Topic.status == status)
+
+    total = (await db.execute(count_query)).scalar_one()
+    result = await db.execute(query.offset((page - 1) * size).limit(size))
+    topics = result.scalars().all()
+
+    return TopicListResponse(
+        items=[TopicResponse.model_validate(t) for t in topics],
+        total=total,
+        page=page,
+        size=size,
+        pages=max(1, -(-total // size)),
+    )
 
 
 @router.post(
@@ -76,6 +90,7 @@ async def discover_topics(
 
 
 @router.put("/{topic_id}/approve", response_model=TopicResponse)
+@router.post("/{topic_id}/approve", response_model=TopicResponse, include_in_schema=False)
 async def approve_topic(
     topic_id: int,
     db: AsyncSession = Depends(get_db),
@@ -89,6 +104,7 @@ async def approve_topic(
 
 
 @router.put("/{topic_id}/reject", response_model=TopicResponse)
+@router.post("/{topic_id}/reject", response_model=TopicResponse, include_in_schema=False)
 async def reject_topic(
     topic_id: int,
     db: AsyncSession = Depends(get_db),

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class ProjectBase(BaseModel):
     name: str
+    description: str | None = None
     brand_settings: dict[str, Any] | None = None
     watermark_path: str | None = None
     fonts: list[str] | None = None
@@ -25,6 +26,7 @@ class ProjectCreate(ProjectBase):
 
 class ProjectUpdate(BaseModel):
     name: str | None = None
+    description: str | None = None
     brand_settings: dict[str, Any] | None = None
     watermark_path: str | None = None
     fonts: list[str] | None = None
@@ -39,7 +41,18 @@ class ProjectUpdate(BaseModel):
 class ProjectResponse(ProjectBase):
     id: int
     user_id: int
+    # job_count is not stored in the DB but defaults to 0 so the frontend
+    # card renders without crashing; a future improvement can populate it.
+    job_count: int = 0
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProjectListResponse(BaseModel):
+    items: list[ProjectResponse]
+    total: int
+    page: int
+    size: int
+    pages: int = 1

@@ -10,7 +10,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
@@ -21,6 +21,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: "UserResponse | None" = None
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -35,7 +36,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
     token = create_access_token(subject=user.id)
-    return TokenResponse(access_token=token)
+    return TokenResponse(access_token=token, user=UserResponse.model_validate(user))
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

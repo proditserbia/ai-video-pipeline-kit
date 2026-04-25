@@ -86,16 +86,19 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Routers
+    # Routers – each data router is mounted at both /api (legacy) and /api/v1 (current)
+    # so the frontend's /api/v1/… calls and the test suite's /api/… calls both work.
+    _data_routers = [auth.router, jobs.router, projects.router, topics.router,
+                     assets.router, settings.router, webhooks.router]
+    for _r in _data_routers:
+        app.include_router(_r, prefix="/api")
+        app.include_router(_r, prefix="/api/v1")
+
+    # Health / metrics – paths are hardcoded in the handler (no router prefix)
     app.include_router(health.router)
-    app.include_router(auth.router)
-    app.include_router(jobs.router)
+
+    # Headless API – already uses full /api/v1/headless prefix internally
     app.include_router(headless.router)
-    app.include_router(projects.router)
-    app.include_router(topics.router)
-    app.include_router(assets.router)
-    app.include_router(settings.router)
-    app.include_router(webhooks.router)
 
     # Validation error handler
     @app.exception_handler(RequestValidationError)

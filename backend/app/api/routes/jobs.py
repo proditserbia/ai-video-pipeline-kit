@@ -11,9 +11,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db
 from app.models.job import Job, JobStatus
 from app.models.user import User
-from app.schemas.job import JobCreate, JobListResponse, JobResponse
+from app.schemas.job import JobCreate, JobListResponse, JobResponse, JobStats
 
-router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+@router.get("/stats", response_model=JobStats)
+async def job_stats(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> JobStats:
+    """Return aggregate job counts for the dashboard stats cards."""
+    counts: dict[str, int] = {}
+    for s in JobStatus:
+        result = await db.execute(
+            select(func.count(Job.id)).where(
+                Job.user_id == current_user.id, Job.status == s
+            )
+        )
+        counts[s.value] = result.scalar_one()
+    total = sum(counts.values())
+    return JobStats(
+        total=total,
+        completed=counts.get("completed", 0),
+        failed=counts.get("failed", 0),
+        processing=counts.get("processing", 0) + counts.get("rendering", 0) + counts.get("uploading", 0),
+        pending=counts.get("pending", 0),
+    )
 
 
 @router.get("", response_model=JobListResponse)
@@ -44,6 +68,7 @@ async def list_jobs(
         total=total,
         page=page,
         size=size,
+        pages=max(1, -(-total // size)),  # ceiling division
     )
 
 
@@ -55,13 +80,25 @@ async def create_job(
 ) -> JobResponse:
     from app.config import settings as app_settings
 
+    # Build input_data from convenience fields when the caller (dashboard form)
+    # sends script/topic/voice_name/caption_style instead of a raw input_data blob.
+    if body.input_data is None:
+        input_data: dict = {
+            "script_text": body.script or "",
+            "topic": body.topic or "",
+            "voice": body.voice_name,
+            "caption_style": body.caption_style,
+        }
+    else:
+        input_data = body.input_data
+
     job = Job(
         id=str(uuid.uuid4()),
         user_id=current_user.id,
         project_id=body.project_id,
         title=body.title,
         job_type=body.job_type,
-        input_data=body.input_data,
+        input_data=input_data,
         dry_run=body.dry_run,
         max_retries=body.max_retries,
     )

@@ -12,6 +12,7 @@ class Project(Base):
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(sa.Integer, sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     brand_settings: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
     watermark_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
     fonts: Mapped[list | None] = mapped_column(sa.JSON, nullable=True)

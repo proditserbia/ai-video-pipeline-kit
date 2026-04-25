@@ -35,6 +35,14 @@ class TopicResponse(TopicBase):
     model_config = {"from_attributes": True}
 
 
+class TopicListResponse(BaseModel):
+    items: list[TopicResponse]
+    total: int
+    page: int
+    size: int
+    pages: int = 1
+
+
 class TopicDiscoverRequest(BaseModel):
     keyword: str | None = None
     sources: list[str] | None = None

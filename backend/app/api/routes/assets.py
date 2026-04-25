@@ -15,7 +15,7 @@ from app.models.asset import Asset
 from app.models.user import User
 from app.schemas.asset import AssetResponse
 
-router = APIRouter(prefix="/api/assets", tags=["assets"])
+router = APIRouter(prefix="/assets", tags=["assets"])
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".mp3", ".wav", ".jpg", ".jpeg", ".png", ".gif"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB

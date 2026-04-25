@@ -12,7 +12,7 @@ from app.models.user import User
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 _webhook_log: list[dict[str, Any]] = []
 

@@ -1,24 +1,49 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.project import Project
 from app.models.user import User
-from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from app.schemas.project import (
+    ProjectCreate,
+    ProjectListResponse,
+    ProjectResponse,
+    ProjectUpdate,
+)
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-@router.get("", response_model=list[ProjectResponse])
+@router.get("", response_model=ProjectListResponse)
 async def list_projects(
+    page: int = 1,
+    size: int = 50,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[ProjectResponse]:
-    result = await db.execute(select(Project).where(Project.user_id == current_user.id))
-    return [ProjectResponse.model_validate(p) for p in result.scalars().all()]
+) -> ProjectListResponse:
+    count_result = await db.execute(
+        select(func.count(Project.id)).where(Project.user_id == current_user.id)
+    )
+    total = count_result.scalar_one()
+
+    result = await db.execute(
+        select(Project)
+        .where(Project.user_id == current_user.id)
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    projects = result.scalars().all()
+
+    return ProjectListResponse(
+        items=[ProjectResponse.model_validate(p) for p in projects],
+        total=total,
+        page=page,
+        size=size,
+        pages=max(1, -(-total // size)),
+    )
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -27,7 +52,11 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ProjectResponse:
-    project = Project(**body.model_dump(), user_id=current_user.id)
+    data = body.model_dump()
+    description = data.pop("description", None)
+    project = Project(**data, user_id=current_user.id)
+    if description:
+        project.description = description
     db.add(project)
     await db.commit()
     await db.refresh(project)

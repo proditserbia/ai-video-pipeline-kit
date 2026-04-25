@@ -35,7 +35,7 @@ export default function ProjectCard({ project }: ProjectCardProps) {
         <div className="mt-3 flex items-center gap-3 text-xs text-gray-500">
           <span className="flex items-center gap-1">
             <Film className="h-3 w-3" />
-            {project.job_count} jobs
+            {project.job_count ?? 0} jobs
           </span>
           <span>{formatRelativeDate(project.created_at)}</span>
         </div>

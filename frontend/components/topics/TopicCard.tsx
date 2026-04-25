@@ -34,7 +34,7 @@ export default function TopicCard({ topic }: TopicCardProps) {
           <p className="mt-2 text-sm text-gray-400">{topic.description}</p>
         )}
 
-        <div className="mt-2 text-xs text-gray-500">Score: {topic.score.toFixed(2)}</div>
+        <div className="mt-2 text-xs text-gray-500">Score: {topic.score != null ? topic.score.toFixed(2) : '—'}</div>
 
         {topic.status === 'pending' && (
           <div className="mt-3 flex gap-2">

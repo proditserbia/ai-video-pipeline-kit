@@ -31,7 +31,6 @@ const schema = z.object({
   topic: z.string().optional(),
   voice_name: z.string().min(1, 'Voice is required'),
   caption_style: z.enum(['none', 'basic', 'bold', 'karaoke']),
-  use_background_music: z.boolean(),
   dry_run: z.boolean(),
 })
 
@@ -53,7 +52,6 @@ export default function CreateJobForm() {
     defaultValues: {
       voice_name: 'en-US-AriaNeural',
       caption_style: 'basic',
-      use_background_music: false,
       dry_run: false,
     },
   })
@@ -68,7 +66,6 @@ export default function CreateJobForm() {
         topic: scriptMode === 'ai' ? data.topic : undefined,
         voice_name: data.voice_name,
         caption_style: data.caption_style,
-        use_background_music: data.use_background_music,
         dry_run: data.dry_run,
       })
       router.push(`/jobs/${job.id}`)
@@ -175,14 +172,6 @@ export default function CreateJobForm() {
       </div>
 
       <div className="flex gap-6">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-gray-600 bg-gray-700 text-blue-500"
-            {...register('use_background_music')}
-          />
-          <span className="text-sm text-gray-300">Background Music</span>
-        </label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"

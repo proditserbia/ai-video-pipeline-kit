@@ -1,9 +1,8 @@
 export interface User {
   id: number
   email: string
-  username: string
   is_active: boolean
-  is_superuser: boolean
+  is_admin: boolean
   created_at: string
 }
 
@@ -16,42 +15,56 @@ export interface ProjectSettings {
 
 export interface Project {
   id: number
+  user_id: number
   name: string
-  description?: string
-  settings: ProjectSettings
-  job_count: number
+  description?: string | null
+  brand_settings?: ProjectSettings | null
+  default_voice?: string | null
+  default_output_format: string
+  job_count?: number
   created_at: string
   updated_at: string
 }
 
 export type JobStatus = 'pending' | 'processing' | 'rendering' | 'uploading' | 'completed' | 'failed' | 'cancelled'
 export type CaptionStyle = 'none' | 'basic' | 'bold' | 'karaoke'
-export type TopicStatus = 'pending' | 'approved' | 'rejected'
+export type TopicStatus = 'pending' | 'approved' | 'rejected' | 'used'
 
 export interface Job {
-  id: number
-  project_id: number
+  id: string
+  project_id: number | null
+  user_id: number
   title: string
   status: JobStatus
-  script?: string
-  topic?: string
-  voice_name: string
-  caption_style: CaptionStyle
-  use_background_music: boolean
+  input_data?: Record<string, unknown> | null
   dry_run: boolean
-  output_url?: string
-  error_message?: string
+  max_retries: number
+  output_path?: string | null
+  output_url?: string | null
+  output_metadata?: Record<string, unknown> | null
+  error_message?: string | null
+  retry_count: number
+  celery_task_id?: string | null
+  validation_result?: Record<string, unknown> | null
   logs: string[]
   created_at: string
   updated_at: string
+  started_at?: string | null
+  completed_at?: string | null
+  // Computed fields derived from input_data by the backend
+  voice_name?: string | null
+  caption_style?: string | null
+  script?: string | null
+  topic?: string | null
 }
 
 export interface Topic {
   id: number
-  project_id: number
   title: string
-  description?: string
-  score: number
+  description?: string | null
+  source?: string | null
+  score?: number | null
+  keywords?: string[] | null
   status: TopicStatus
   created_at: string
 }
@@ -60,11 +73,12 @@ export type AssetType = 'video' | 'audio' | 'image' | 'script' | 'other'
 
 export interface Asset {
   id: number
-  project_id: number
-  name: string
+  project_id?: number | null
+  filename: string
   file_path: string
-  asset_type: AssetType
-  file_size: number
+  file_type: string
+  mime_type?: string | null
+  source: string
   created_at: string
 }
 
@@ -76,7 +90,7 @@ export interface LoginRequest {
 export interface LoginResponse {
   access_token: string
   token_type: string
-  user: User
+  user?: User | null
 }
 
 export interface CreateJobRequest {
@@ -86,7 +100,6 @@ export interface CreateJobRequest {
   topic?: string
   voice_name: string
   caption_style: CaptionStyle
-  use_background_music: boolean
   dry_run: boolean
 }
 

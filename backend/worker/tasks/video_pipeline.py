@@ -16,6 +16,37 @@ def _append_log(db, job, line: str) -> None:
     db.commit()
 
 
+def _resolve_script_text(input_data: dict) -> str:
+    """Extract script text from either flat (jobs API) or nested (headless API) input_data."""
+    flat = input_data.get("script_text", "")
+    if flat:
+        return flat
+    script_cfg = input_data.get("script", {})
+    if isinstance(script_cfg, dict):
+        return script_cfg.get("text", "")
+    return ""
+
+
+def _resolve_topic(input_data: dict) -> str:
+    """Extract topic from either flat or nested input_data."""
+    flat = input_data.get("topic", "")
+    if flat:
+        return flat
+    script_cfg = input_data.get("script", {})
+    if isinstance(script_cfg, dict):
+        return script_cfg.get("topic", "")
+    return ""
+
+
+def _resolve_voice(input_data: dict) -> str:
+    """Extract voice ID from either flat or nested input_data."""
+    voice = input_data.get("voice", "en-US-AriaNeural")
+    if isinstance(voice, dict):
+        # Headless API stores voice as {"provider": "...", "voice_id": "..."}
+        return voice.get("voice_id", "en-US-AriaNeural")
+    return voice or "en-US-AriaNeural"
+
+
 @celery_app.task(bind=True, name="worker.tasks.video_pipeline.run_video_pipeline")
 def run_video_pipeline(self, job_id: str) -> dict:
     """
@@ -56,13 +87,13 @@ def run_video_pipeline(self, job_id: str) -> dict:
         work_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Step 3: Script ─────────────────────────────────────────────
-        script_text: str = input_data.get("script_text", "")
+        script_text: str = _resolve_script_text(input_data)
         if not script_text and flags.is_enabled("ai_scripts"):
             _append_log(db, job, "Generating script via AI")
             from worker.modules.script_generator.openai_provider import OpenAIScriptProvider
             from worker.modules.script_generator.placeholder_provider import PlaceholderScriptProvider
 
-            topic = input_data.get("topic", job.title)
+            topic = _resolve_topic(input_data) or job.title
             if settings.OPENAI_API_KEY:
                 provider = OpenAIScriptProvider()
             else:
@@ -77,7 +108,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
         audio_path: Path | None = None
         if flags.is_enabled("tts"):
             _append_log(db, job, "Synthesising TTS audio")
-            voice = input_data.get("voice", "en-US-AriaNeural")
+            voice = _resolve_voice(input_data)
             audio_out = work_dir / "voice.mp3"
             if not job.dry_run:
                 if settings.EDGE_TTS_ENABLED:
@@ -181,7 +212,12 @@ def run_video_pipeline(self, job_id: str) -> dict:
             _append_log(db, job, f"ERROR: {exc}\n{tb}")
             db.commit()
         logger.exception("pipeline_failed", job_id=job_id, error=str(exc))
-        raise self.retry(exc=exc, countdown=60)
+        # Only retry on transient infrastructure errors (network / OS / DB IO).
+        # Logic errors (missing binary, bad config, invalid script) should not
+        # be retried automatically – they will fail again immediately.
+        if isinstance(exc, (OSError, ConnectionError, TimeoutError)):
+            raise self.retry(exc=exc, countdown=60)
+        raise
 
     finally:
         db.close()
