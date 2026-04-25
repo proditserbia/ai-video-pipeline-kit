@@ -16,8 +16,8 @@ DEFAULT_SYSTEM_PROMPT = (
 
 
 class OpenAIScriptProvider(AbstractScriptProvider):
-    def generate(self, topic: str, settings: dict[str, Any] | None = None) -> ScriptResult:
-        cfg = settings or {}
+    def generate(self, topic: str, config: dict[str, Any] | None = None) -> ScriptResult:
+        cfg = config or {}
         system_prompt = cfg.get("system_prompt", DEFAULT_SYSTEM_PROMPT)
         model = cfg.get("model", "gpt-4o-mini")
         max_tokens = int(cfg.get("max_tokens", 512))

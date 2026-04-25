@@ -18,7 +18,7 @@ def discover_trends() -> dict:
     if not FeatureFlags().is_enabled("trends"):
         return {"skipped": True, "reason": "trends feature disabled"}
 
-    db = SyncSessionLocal()
+    db = SyncSessionLocal()()
     created = 0
     try:
         providers = []

@@ -57,7 +57,7 @@ class TrendItem:
 
 class BaseScriptProvider(ABC):
     @abstractmethod
-    def generate(self, topic: str, settings: dict[str, Any]) -> ScriptResult: ...
+    def generate(self, topic: str, config: dict[str, Any] | None = None) -> ScriptResult: ...
 
 
 class BaseTTSProvider(ABC):

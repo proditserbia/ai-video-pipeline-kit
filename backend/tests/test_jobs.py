@@ -6,7 +6,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_create_job_requires_auth(client):
     response = await client.post("/api/jobs", json={"title": "Test Job"})
-    assert response.status_code == 403
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

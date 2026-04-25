@@ -37,7 +37,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
     from app.models.job import Job, JobStatus
 
     flags = FeatureFlags()
-    db = SyncSessionLocal()
+    db = SyncSessionLocal()()
     job: Job | None = None
 
     try:
@@ -67,7 +67,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 provider = OpenAIScriptProvider()
             else:
                 provider = PlaceholderScriptProvider()
-            result = provider.generate(topic=topic, settings=input_data.get("script_settings", {}))
+            result = provider.generate(topic=topic, config=input_data.get("script_settings", {}))
             script_text = result.text
             _append_log(db, job, f"Script generated ({len(script_text)} chars)")
         elif not script_text:

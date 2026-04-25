@@ -24,6 +24,9 @@ def _escape_srt_path(path: str) -> str:
     for ch in (":", "'", "[", "]", ";", ","):
         path = path.replace(ch, "\\" + ch)
     return path
+
+
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     """Run an FFmpeg/ffprobe command. Never uses shell=True."""
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

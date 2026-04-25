@@ -26,7 +26,7 @@ subscribe for more content just like this.
 class PlaceholderScriptProvider(AbstractScriptProvider):
     """Returns a structured placeholder script when no API key is configured."""
 
-    def generate(self, topic: str, settings: dict[str, Any] | None = None) -> ScriptResult:
+    def generate(self, topic: str, config: dict[str, Any] | None = None) -> ScriptResult:
         text = PLACEHOLDER_TEMPLATE.format(topic=topic)
         return ScriptResult(
             text=text,

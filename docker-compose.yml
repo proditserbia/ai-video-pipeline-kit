@@ -41,8 +41,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-change_me_in_production_min_32_chars_!!}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
@@ -66,8 +66,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
-      - ASYNC_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-aivideo}:${POSTGRES_PASSWORD:-aivideo_secret}@postgres:5432/${POSTGRES_DB:-aivideo}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-change_me_in_production_min_32_chars_!!}
       - STORAGE_PATH=/storage

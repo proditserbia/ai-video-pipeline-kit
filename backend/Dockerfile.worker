@@ -16,4 +16,4 @@ COPY . .
 
 RUN mkdir -p /storage/output /storage/assets /storage/temp /storage/audio /storage/captions
 
-CMD ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=2", "-Q", "video,default"]
+CMD ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info", "--concurrency=2", "-Q", "pipeline,scheduled,default"]
