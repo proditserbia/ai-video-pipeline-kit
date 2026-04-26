@@ -12,8 +12,15 @@ logger = structlog.get_logger(__name__)
 
 
 def _append_log(db, job, line: str) -> None:
+    from sqlalchemy.exc import SQLAlchemyError
+
     job.logs = (job.logs or "") + f"[{datetime.now(timezone.utc).isoformat()}] {line}\n"
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        logger.warning("append_log_commit_failed_retrying", error=str(exc))
+        db.rollback()
+        db.commit()
 
 
 def _resolve_script_text(input_data: dict) -> str:
@@ -65,6 +72,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
     from app.config import settings
     from app.core.feature_flags import FeatureFlags
     from app.database import SyncSessionLocal
+    import app.models  # noqa: F401 – ensure all models are registered in Base metadata
     from app.models.job import Job, JobStatus
 
     flags = FeatureFlags()
