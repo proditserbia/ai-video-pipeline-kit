@@ -56,6 +56,9 @@ export interface Job {
   caption_style?: string | null
   script?: string | null
   topic?: string | null
+  // TTS outcome fields derived from output_metadata by the backend
+  tts_status?: 'success' | 'skipped' | 'failed' | null
+  tts_warning?: string | null
 }
 
 export interface Topic {

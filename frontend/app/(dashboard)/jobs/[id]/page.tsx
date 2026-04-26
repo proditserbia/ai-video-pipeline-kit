@@ -98,6 +98,14 @@ export default function JobDetailPage() {
         </Alert>
       )}
 
+      {(job.tts_status === 'skipped' || job.tts_status === 'failed') && (
+        <Alert variant="warning">
+          <AlertDescription>
+            {job.tts_warning || 'TTS was skipped. Video was rendered without voiceover.'}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {job.script && (
         <Card>
           <CardHeader><CardTitle>Script</CardTitle></CardHeader>

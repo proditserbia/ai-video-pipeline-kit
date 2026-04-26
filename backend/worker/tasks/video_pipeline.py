@@ -138,17 +138,30 @@ def run_video_pipeline(self, job_id: str) -> dict:
                         _run_async(tts_provider.synthesize(script_text, voice, str(audio_out)))
                         audio_path = audio_out
                         _append_log(db, job, f"TTS audio: {audio_path}")
+                        job.output_metadata = {
+                            **(job.output_metadata or {}),
+                            "tts_status": "success",
+                        }
+                        db.commit()
                     except Exception as tts_exc:
                         tts_error = f"TTS provider {type(tts_provider).__name__} failed: {tts_exc}"
                         _append_log(db, job, f"TTS warning: {tts_error} – continuing without audio")
                         log.warning("tts_failed", provider=type(tts_provider).__name__, error=str(tts_exc))
                         job.output_metadata = {
                             **(job.output_metadata or {}),
+                            "tts_status": "failed",
                             "tts_warning": tts_error,
                         }
                         db.commit()
                 else:
                     _append_log(db, job, "TTS skipped: no provider configured")
+                    log.warning("tts_skipped", reason="no_provider_configured")
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "tts_status": "skipped",
+                        "tts_warning": "TTS was skipped. No provider is configured. Video will render without voiceover.",
+                    }
+                    db.commit()
             else:
                 audio_path = audio_out
                 _append_log(db, job, f"TTS audio (dry run): {audio_path}")
@@ -249,7 +262,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
         job.completed_at = datetime.now(timezone.utc)
         if output_path:
             job.output_path = str(output_path)
-        job.output_metadata = {"upload_url": upload_url}
+        job.output_metadata = {**(job.output_metadata or {}), "upload_url": upload_url}
         _append_log(db, job, "Pipeline completed")
         db.commit()
         log.info("pipeline_completed")

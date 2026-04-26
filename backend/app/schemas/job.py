@@ -115,6 +115,18 @@ class JobResponse(JobBase):
             return None
         return f"/api/v1/jobs/{self.id}/download"
 
+    @computed_field  # type: ignore[misc]
+    @property
+    def tts_status(self) -> str | None:
+        """TTS outcome: 'success', 'skipped', or 'failed'."""
+        return (self.output_metadata or {}).get("tts_status")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def tts_warning(self) -> str | None:
+        """Human-readable TTS warning when status is 'skipped' or 'failed'."""
+        return (self.output_metadata or {}).get("tts_warning")
+
 
 class JobListResponse(BaseModel):
     items: list[JobResponse]
