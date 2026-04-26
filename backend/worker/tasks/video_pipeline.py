@@ -160,11 +160,30 @@ def run_video_pipeline(self, job_id: str) -> dict:
             if not job.dry_run:
                 media_dir = work_dir / "media"
                 media_dir.mkdir(exist_ok=True)
-                from worker.modules.stock_media.local_provider import LocalMediaProvider
-                provider = LocalMediaProvider()
-                assets = provider.fetch(query=job.title, count=3, output_dir=str(media_dir))
+                from worker.modules.stock_media.selector import StockMediaSelector
+
+                # Build search query from script text → topic → job title
+                search_query = (
+                    script_text
+                    or _resolve_topic(input_data)
+                    or job.title
+                )
+                selector = StockMediaSelector()
+                assets, stock_provider = selector.fetch(
+                    query=search_query,
+                    count=3,
+                    output_dir=str(media_dir),
+                )
                 media_clips = [Path(a.path) for a in assets]
-            _append_log(db, job, f"Stock media clips: {len(media_clips)}")
+                _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider}")
+                job.output_metadata = {
+                    **(job.output_metadata or {}),
+                    "stock_provider": stock_provider,
+                    "clip_sources": [a.source for a in assets],
+                }
+                db.commit()
+            else:
+                _append_log(db, job, "Stock media skipped (dry run)")
 
         # ── Step 6: Captions ───────────────────────────────────────────
         srt_path: Path | None = None
