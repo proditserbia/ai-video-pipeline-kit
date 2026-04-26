@@ -206,8 +206,21 @@ async def retry_job(
         job.celery_task_id = task.id
         await db.commit()
         await db.refresh(job)
-    except Exception:
-        pass
+    except Exception as exc:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        error_msg = f"Celery dispatch failed: {exc}"
+        job.status = JobStatus.failed
+        job.error_message = error_msg
+        job.logs = f"[{timestamp}] {error_msg}\n"
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Failed to queue the retry task. "
+                "The task queue (Redis/Celery) may be unavailable. "
+                f"Error: {exc}"
+            ),
+        )
 
     return JobResponse.model_validate(job)
 

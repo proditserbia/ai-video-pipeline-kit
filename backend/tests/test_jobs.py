@@ -256,10 +256,62 @@ async def test_create_job_celery_dispatch_failure_returns_503(
         )
         failed_job = result.scalar_one_or_none()
 
-    assert failed_job is not None, "Job row must be persisted even on dispatch failure"
-    assert failed_job.status == JobStatus.failed
-    assert failed_job.error_message is not None
-    assert "Celery dispatch failed" in failed_job.error_message
-    assert failed_job.logs is not None
-    assert "Celery dispatch failed" in failed_job.logs
+
+
+@pytest.mark.asyncio
+async def test_retry_job_celery_dispatch_failure_returns_503(
+    client, admin_token, session_factory
+):
+    """When apply_async raises during retry, the endpoint must return 503, the
+    job must be persisted with status='failed', and error_message must be set
+    (no silent pending job)."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Create a job that succeeds dispatch so we have a real DB row
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Retry Dispatch Fail", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    # Manually flip job to failed so it is eligible for retry
+    from sqlalchemy import update
+    from app.models.job import Job, JobStatus
+
+    async with session_factory() as db:
+        await db.execute(
+            update(Job).where(Job.id == job_id).values(
+                status=JobStatus.failed, error_message="previous failure"
+            )
+        )
+        await db.commit()
+
+    # Now retry – make apply_async raise
+    with patch(
+        "worker.tasks.video_pipeline.run_video_pipeline.apply_async",
+        side_effect=Exception("broker down"),
+    ):
+        retry_resp = await client.post(
+            f"/api/jobs/{job_id}/retry",
+            headers=headers,
+        )
+
+    assert retry_resp.status_code == 503
+    detail = retry_resp.json()["detail"]
+    assert "broker down" in detail
+
+    # Job must be back to failed, not stuck in pending
+    from sqlalchemy import select
+    async with session_factory() as db:
+        result = await db.execute(select(Job).where(Job.id == job_id))
+        job = result.scalar_one_or_none()
+
+    assert job is not None
+    assert job.status == JobStatus.failed
+    assert job.error_message is not None
+    assert "Celery dispatch failed" in job.error_message
+    assert job.logs is not None
+    assert "Celery dispatch failed" in job.logs
 
