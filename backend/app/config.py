@@ -41,7 +41,6 @@ class Settings(BaseSettings):
     # OpenAI / LLM
     OPENAI_API_KEY: str | None = None
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-    ANTHROPIC_API_KEY: str | None = None
 
     # TTS
     EDGE_TTS_ENABLED: bool = False
@@ -53,9 +52,6 @@ class Settings(BaseSettings):
     # Stock media
     PEXELS_API_KEY: str | None = None
     PIXABAY_API_KEY: str | None = None
-
-    # YouTube
-    YOUTUBE_CLIENT_SECRETS_FILE: str | None = None
 
     # Cloud storage (S3-compatible)
     S3_ENDPOINT_URL: str | None = None
@@ -78,7 +74,6 @@ class Settings(BaseSettings):
         "captions": True,
         "stock_media": True,
         "n8n": True,
-        "youtube_upload": False,
         "social_uploaders": False,
         "gpu_rendering": False,
         "cloud_storage": False,

@@ -42,5 +42,4 @@ async def get_credentials() -> dict[str, bool]:
         "edge_tts": settings.EDGE_TTS_ENABLED,
         "pexels": bool(settings.PEXELS_API_KEY),
         "pixabay": bool(settings.PIXABAY_API_KEY),
-        "youtube": bool(settings.YOUTUBE_CLIENT_SECRETS_FILE),
     }

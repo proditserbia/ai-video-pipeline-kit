@@ -34,7 +34,7 @@ Browser (Next.js :3000) → FastAPI Backend (:8000) → PostgreSQL + Redis
 | AI Script Generator | ✅ MVP | OpenAI key (optional) |
 | Stock Media | ✅ MVP | Pexels/Pixabay key (optional) |
 | Trend Discovery | ✅ MVP | optional |
-| YouTube Upload | ✅ MVP | OAuth credentials |
+| YouTube Upload | ❌ Not implemented | — |
 | n8n Integration | ✅ MVP | n8n instance |
 | GPU Rendering (NVENC) | ✅ MVP | NVIDIA GPU |
 

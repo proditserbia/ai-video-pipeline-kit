@@ -25,7 +25,6 @@ def test_feature_flags_defaults():
     assert flags.is_enabled("core_video") is True
     assert flags.is_enabled("ai_scripts") is True
     assert flags.is_enabled("tts") is True
-    assert flags.is_enabled("youtube_upload") is False
     assert flags.is_enabled("gpu_rendering") is False
     assert flags.is_enabled("nonexistent_flag") is False
 
