@@ -22,6 +22,22 @@ def _coqui_reachable() -> bool:
         return False
 
 
+def log_tts_config() -> None:
+    """Log a TTS configuration summary at worker startup. Secrets are never logged."""
+    openai_configured = bool(settings.OPENAI_API_KEY)
+    coqui_enabled = settings.COQUI_TTS_ENABLED
+    coqui_reachable = _coqui_reachable() if coqui_enabled else False
+    edge_enabled = settings.EDGE_TTS_ENABLED
+    logger.info(
+        "TTS config summary: openai_configured=%s, coqui_enabled=%s, "
+        "coqui_reachable=%s, edge_enabled=%s",
+        openai_configured,
+        coqui_enabled,
+        coqui_reachable,
+        edge_enabled,
+    )
+
+
 def get_tts_provider() -> AbstractTTSProvider | None:
     """
     Return the highest-priority TTS provider that is available based on the
@@ -51,3 +67,18 @@ def get_tts_provider() -> AbstractTTSProvider | None:
         return EdgeTTSProvider()
 
     return None
+
+
+_PROVIDER_NAMES: dict[str, str] = {
+    "ElevenLabsTTSProvider": "elevenlabs",
+    "OpenAITTSProvider": "openai",
+    "CoquiTTSProvider": "coqui",
+    "EdgeTTSProvider": "edge",
+}
+
+
+def get_tts_provider_name(provider: AbstractTTSProvider | None) -> str:
+    """Return a short lowercase name for *provider*, or ``'none'`` if it is ``None``."""
+    if provider is None:
+        return "none"
+    return _PROVIDER_NAMES.get(type(provider).__name__, type(provider).__name__.lower())
