@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import structlog
+from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
 from worker.modules.base import MediaAsset
@@ -38,36 +39,47 @@ class PixabayProvider(AbstractStockProvider):
             logger.error("pixabay_fetch_error", error=str(exc))
             return []
 
-        assets: list[MediaAsset] = []
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
+        # Build list of (hit_metadata, file_url, dest, chosen) for parallel download.
+        tasks: list[tuple[dict, str, Path, dict]] = []
         for hit in data.get("hits", [])[:count]:
             videos = hit.get("videos", {})
-            # Prefer "small" size for speed
             chosen = videos.get("small") or videos.get("medium") or videos.get("large")
             if not chosen:
                 continue
             file_url = chosen.get("url")
             if not file_url:
                 continue
-
             dest = out / f"pixabay_{hit['id']}.mp4"
+            tasks.append((hit, file_url, dest, chosen))
+
+        if not tasks:
+            return []
+
+        def _download(task: tuple[dict, str, Path, dict]) -> MediaAsset | None:
+            hit, file_url, dest, chosen = task
             try:
                 with httpx.Client(timeout=60) as dl:
                     with dl.stream("GET", file_url) as r:
                         with open(dest, "wb") as f:
                             for chunk in r.iter_bytes(65536):
                                 f.write(chunk)
-                assets.append(MediaAsset(
+                return MediaAsset(
                     path=str(dest),
                     source="pixabay",
                     width=chosen.get("width", 0),
                     height=chosen.get("height", 0),
                     duration=float(hit.get("duration", 0)),
                     metadata={"id": hit["id"]},
-                ))
+                )
             except Exception as exc:
                 logger.warning("pixabay_download_error", url=file_url, error=str(exc))
+                return None
 
-        return assets
+        max_workers = max(1, min(settings.PIPELINE_MAX_WORKERS, len(tasks)))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(_download, tasks))
+
+        return [r for r in results if r is not None]

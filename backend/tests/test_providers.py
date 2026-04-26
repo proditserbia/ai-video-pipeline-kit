@@ -69,7 +69,7 @@ class TestLocalExporter:
         exporter = LocalExporter(output_dir=str(base_dir))
         result = exporter.upload(str(src), {"title": "Test"})
         assert result.skipped is False
-        assert result.url.startswith("file://")
+        assert result.url == "/api/v1/jobs/source/download"
         assert (base_dir / "outputs" / "source.mp4").exists()
 
 

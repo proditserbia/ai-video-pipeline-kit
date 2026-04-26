@@ -7,6 +7,15 @@ from pydantic import BaseModel, computed_field, field_validator
 
 from app.models.job import JobStatus, JobType
 
+# The canonical set of caption styles accepted by the pipeline.
+# Must be kept in sync with CAPTION_STYLE_MAP in
+# worker/modules/video_builder/ffmpeg_builder.py.
+# "none" is a special opt-out value that tells the pipeline to skip caption
+# rendering (passed through as-is and handled by the worker).
+VALID_CAPTION_STYLES: frozenset[str] = frozenset(
+    {"none", "basic", "bold_center", "boxed", "large_bottom", "karaoke_placeholder"}
+)
+
 
 class JobBase(BaseModel):
     title: str
@@ -25,6 +34,16 @@ class JobCreate(JobBase):
     topic: str | None = None
     voice_name: str = "en-US-AriaNeural"
     caption_style: str = "basic"
+
+    @field_validator("caption_style")
+    @classmethod
+    def _validate_caption_style(cls, v: str) -> str:
+        if v not in VALID_CAPTION_STYLES:
+            raise ValueError(
+                f"Invalid caption_style '{v}'. "
+                f"Must be one of: {', '.join(sorted(VALID_CAPTION_STYLES))}"
+            )
+        return v
 
 
 class JobUpdate(BaseModel):
@@ -114,6 +133,53 @@ class JobResponse(JobBase):
         if not self.output_path:
             return None
         return f"/api/v1/jobs/{self.id}/download"
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def thumbnail_url(self) -> str | None:
+        """Return the URL to fetch the job thumbnail, if one was generated."""
+        if not (self.output_metadata or {}).get("thumbnail_path"):
+            return None
+        return f"/api/v1/jobs/{self.id}/thumbnail"
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def tts_status(self) -> str | None:
+        """TTS outcome: 'success', 'skipped', or 'failed'."""
+        return (self.output_metadata or {}).get("tts_status")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def tts_warning(self) -> str | None:
+        """Human-readable TTS warning when status is 'skipped' or 'failed'."""
+        return (self.output_metadata or {}).get("tts_warning")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def caption_status(self) -> str | None:
+        """Caption outcome: 'success', 'skipped', or 'failed'."""
+        return (self.output_metadata or {}).get("caption_status")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def caption_warning(self) -> str | None:
+        """Human-readable caption warning when status is 'skipped' or 'failed'."""
+        return (self.output_metadata or {}).get("caption_warning")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def result_quality(self) -> str | None:
+        """Overall quality of this job's output: 'complete', 'partial', or 'fallback'."""
+        return (self.output_metadata or {}).get("result_quality")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def warnings(self) -> list[str]:
+        """List of human-readable warnings accumulated during the pipeline run."""
+        v = (self.output_metadata or {}).get("warnings")
+        if isinstance(v, list):
+            return v
+        return []
 
 
 class JobListResponse(BaseModel):

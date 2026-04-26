@@ -27,8 +27,21 @@ export interface Project {
 }
 
 export type JobStatus = 'pending' | 'processing' | 'rendering' | 'uploading' | 'completed' | 'failed' | 'cancelled'
-export type CaptionStyle = 'none' | 'basic' | 'bold' | 'karaoke'
+export type CaptionStyle = 'none' | 'basic' | 'bold_center' | 'boxed' | 'large_bottom' | 'karaoke_placeholder'
 export type TopicStatus = 'pending' | 'approved' | 'rejected' | 'used'
+
+export interface ValidationResult {
+  passed: boolean
+  width: number
+  height: number
+  duration: number
+  has_audio: boolean
+  video_codec: string
+  audio_codec: string
+  file_size_bytes: number
+  errors: string[]
+  warnings: string[]
+}
 
 export interface Job {
   id: string
@@ -41,11 +54,12 @@ export interface Job {
   max_retries: number
   output_path?: string | null
   output_url?: string | null
+  thumbnail_url?: string | null
   output_metadata?: Record<string, unknown> | null
   error_message?: string | null
   retry_count: number
   celery_task_id?: string | null
-  validation_result?: Record<string, unknown> | null
+  validation_result?: ValidationResult | null
   logs: string[]
   created_at: string
   updated_at: string
@@ -56,6 +70,15 @@ export interface Job {
   caption_style?: string | null
   script?: string | null
   topic?: string | null
+  // TTS outcome fields derived from output_metadata by the backend
+  tts_status?: 'success' | 'skipped' | 'failed' | null
+  tts_warning?: string | null
+  // Caption outcome fields derived from output_metadata by the backend
+  caption_status?: 'success' | 'skipped' | 'failed' | null
+  caption_warning?: string | null
+  // Result quality and warnings derived from output_metadata by the backend
+  result_quality?: 'complete' | 'partial' | 'fallback' | null
+  warnings?: string[] | null
 }
 
 export interface Topic {

@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils'
 import { HTMLAttributes } from 'react'
 
 interface AlertProps extends HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'destructive' | 'success'
+  variant?: 'default' | 'destructive' | 'success' | 'warning'
 }
 
 function Alert({ className, variant = 'default', ...props }: AlertProps) {
@@ -14,6 +14,7 @@ function Alert({ className, variant = 'default', ...props }: AlertProps) {
         variant === 'default' && 'border-gray-700 bg-gray-800 text-gray-200',
         variant === 'destructive' && 'border-red-700 bg-red-900/20 text-red-400',
         variant === 'success' && 'border-green-700 bg-green-900/20 text-green-400',
+        variant === 'warning' && 'border-yellow-600 bg-yellow-900/20 text-yellow-400',
         className
       )}
       {...props}

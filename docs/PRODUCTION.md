@@ -15,10 +15,11 @@ This guide walks through a complete production setup:
 6. [Docker Compose — Production Mode](#6-docker-compose--production-mode)
 7. [Next.js API URL](#7-nextjs-api-url)
 8. [Start the Stack](#8-start-the-stack)
-9. [Verify Everything Works](#9-verify-everything-works)
-10. [Auto-Renewal](#10-auto-renewal)
-11. [Optional Hardening](#11-optional-hardening)
-12. [Updating the App](#12-updating-the-app)
+9. [Production Readiness Check](#9-production-readiness-check)
+10. [Verify Everything Works](#10-verify-everything-works)
+11. [Auto-Renewal](#11-auto-renewal)
+12. [Optional Hardening](#12-optional-hardening)
+13. [Updating the App](#13-updating-the-app)
 
 ---
 
@@ -231,7 +232,64 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ---
 
-## 9. Verify Everything Works
+## 9. Production Readiness Check
+
+Before exposing the stack to traffic, run the readiness check to confirm all
+services and dependencies are configured correctly:
+
+```bash
+# Run from the repo root (after docker compose up, or on the host directly)
+python scripts/check_production_readiness.py
+```
+
+The script prints a **PASS / WARN / FAIL** table and exits with code `0` (all
+clear) or `1` (at least one FAIL).
+
+Example output:
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ AI Video Pipeline Kit — Production Readiness Check                          ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+  CHECK                              STATUS  DETAIL
+──────────────────────────────────────────────────────────────────────────────
+  PostgreSQL connection              PASS    Connected (db=aivideo)
+  Redis connection                   PASS    redis://redis:6379/0
+  FFmpeg installed                   PASS    /usr/bin/ffmpeg
+  ffprobe installed                  PASS    /usr/bin/ffprobe
+  TTS provider configured            PASS    edge-tts
+  Stock media provider               WARN    No API keys; placeholder clips used
+  Output storage writable            PASS    /storage/outputs
+  Whisper / captions                 PASS    faster-whisper available (model=base)
+  SECRET_KEY changed                 PASS    Custom key set (length OK)
+  NEXT_PUBLIC_API_URL                PASS    https://avpk.prodit.rs/api/v1
+──────────────────────────────────────────────────────────────────────────────
+
+  RESULT: 1 WARN, 9 PASS
+```
+
+### What each check tests
+
+| Check | PASS condition | WARN / FAIL condition |
+|---|---|---|
+| **PostgreSQL connection** | `psycopg2` can connect and execute a query | Cannot connect → FAIL |
+| **Redis connection** | `redis-py` ping succeeds | Cannot ping → FAIL |
+| **FFmpeg installed** | `ffmpeg` found on PATH | Not found → FAIL |
+| **ffprobe installed** | `ffprobe` found on PATH | Not found → FAIL |
+| **TTS provider configured** | `EDGE_TTS_ENABLED=true` or an API key set | None configured → WARN |
+| **Stock media provider** | Pexels/Pixabay key set, or local video assets present | Neither → WARN (placeholder used) |
+| **Output storage writable** | Can create a temp file in `$STORAGE_PATH/outputs` | Permission error → FAIL |
+| **Whisper / captions** | `WHISPER_ENABLED=true` and `faster-whisper` importable | Disabled → WARN; not installed → WARN |
+| **SECRET_KEY changed** | Not a known default, length ≥ 32 chars | Default/weak key → FAIL |
+| **NEXT_PUBLIC_API_URL** | Starts with `https://` and not `localhost` | Not set → WARN; localhost URL → WARN |
+
+> **Tip:** Run `python scripts/check_production_readiness.py || exit 1` in your
+> CI/CD pipeline or deployment script to gate the deployment on a clean result.
+
+---
+
+## 10. Verify Everything Works
 
 ```bash
 # 1. Frontend (returns HTML)
@@ -259,9 +317,7 @@ curl http://avpk.prodit.rs:8000   # Should time out or be refused
 
 ---
 
-## 10. Auto-Renewal
-
-Certbot installs a systemd timer that renews certificates automatically.
+## 11. Auto-Renewal that renews certificates automatically.
 Verify it is active:
 
 ```bash
@@ -280,7 +336,7 @@ Nginx is reloaded automatically after renewal via the `/etc/letsencrypt/renewal-
 
 ---
 
-## 11. Optional Hardening
+## 12. Optional Hardening
 
 ### Gzip
 Already enabled in `nginx/avpk.prodit.rs.conf` for HTML, CSS, JS, JSON, SVG,
@@ -317,7 +373,7 @@ sudo systemctl enable --now fail2ban
 
 ---
 
-## 12. Updating the App
+## 13. Updating the App
 
 ```bash
 cd /path/to/ai-video-pipeline-kit

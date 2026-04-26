@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import structlog
@@ -37,10 +38,14 @@ class LocalMediaProvider(AbstractStockProvider):
         for f in local_files[:count]:
             assets.append(MediaAsset(path=str(f), source="local"))
 
-        # Generate placeholder coloured clips for any remaining slots
+        # Generate placeholder coloured clips for any remaining slots in parallel.
         needed = count - len(assets)
+        if needed <= 0:
+            return assets
+
         colours = ["0x2c3e50", "0x8e44ad", "0x16a085"]
-        for i in range(needed):
+
+        def _generate_placeholder(i: int) -> MediaAsset | None:
             colour = colours[i % len(colours)]
             dest = out / f"placeholder_{i}.mp4"
             try:
@@ -56,14 +61,20 @@ class LocalMediaProvider(AbstractStockProvider):
                     capture_output=True,
                     check=True,
                 )
-                assets.append(MediaAsset(
+                return MediaAsset(
                     path=str(dest),
                     source="local_placeholder",
                     width=1080,
                     height=1920,
                     duration=10.0,
-                ))
+                )
             except Exception as exc:
                 logger.warning("placeholder_clip_failed", error=str(exc))
+                return None
 
+        max_workers = max(1, min(settings.PIPELINE_MAX_WORKERS, needed))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(_generate_placeholder, range(needed)))
+
+        assets.extend(r for r in results if r is not None)
         return assets

@@ -66,6 +66,101 @@ def _resolve_voice(input_data: dict) -> str:
     return voice or "en-US-AriaNeural"
 
 
+def _resolve_caption_style(input_data: dict) -> str | None:
+    style = input_data.get("caption_style")
+    if style:
+        return style
+    # Headless API may nest it inside a captions config dict
+    captions_cfg = input_data.get("captions", {})
+    if isinstance(captions_cfg, dict):
+        return captions_cfg.get("style")
+    return None
+
+
+def _cleanup_work_dir(work_dir: Path, job_id: str, *, keep: bool = False) -> None:
+    """Remove the temporary job work directory.
+
+    Args:
+        work_dir: Path to the directory to remove.
+        job_id:   Used only for log context.
+        keep:     When *True* the directory is not deleted (debug mode).
+    """
+    import shutil
+
+    if keep:
+        logger.info("workdir_kept", job_id=job_id, path=str(work_dir))
+        return
+    if not work_dir.exists():
+        return
+    try:
+        shutil.rmtree(work_dir)
+        logger.info("workdir_cleaned", job_id=job_id, path=str(work_dir))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("workdir_cleanup_failed", job_id=job_id, path=str(work_dir), error=str(exc))
+
+
+def _resolve_brand_assets(db, input_data: dict, job) -> tuple:
+    """Resolve watermark and background music file paths from asset IDs.
+
+    Priority for each asset:
+      1. job ``input_data`` override (flat key or nested under ``"brand"``)
+      2. project-level ``watermark_asset_id`` / ``background_music_asset_id``
+
+    Returns ``(watermark_asset_id, watermark_path, bg_music_asset_id, bg_music_path)``.
+    Paths are ``Path | None``; IDs are ``int | None``.
+    Paths are returned regardless of whether the file currently exists on
+    disk; ``FFmpegVideoBuilder._compose`` skips missing files gracefully.
+    """
+    from pathlib import Path as _Path
+
+    from app.models.asset import Asset
+    from app.models.project import Project
+
+    def _asset_path(asset_id) -> _Path | None:
+        if asset_id is None:
+            return None
+        try:
+            asset_id = int(asset_id)
+        except (TypeError, ValueError):
+            return None
+        asset = db.query(Asset).filter(Asset.id == asset_id).first()
+        if asset and asset.file_path:
+            return _Path(asset.file_path)
+        return None
+
+    # Resolve IDs — input_data overrides project settings.
+    brand_cfg = input_data.get("brand") or {}
+    if not isinstance(brand_cfg, dict):
+        brand_cfg = {}
+
+    watermark_id = input_data.get("watermark_asset_id") or brand_cfg.get("watermark_asset_id")
+    bg_music_id = (
+        input_data.get("bg_music_asset_id")
+        or brand_cfg.get("bg_music_asset_id")
+    )
+
+    # Fall back to project-level brand settings.
+    if (not watermark_id or not bg_music_id) and job.project_id:
+        project = db.query(Project).filter(Project.id == job.project_id).first()
+        if project:
+            if not watermark_id:
+                watermark_id = project.watermark_asset_id
+            if not bg_music_id:
+                bg_music_id = project.background_music_asset_id
+
+    # Normalise IDs to int or None.
+    try:
+        watermark_id = int(watermark_id) if watermark_id is not None else None
+    except (TypeError, ValueError):
+        watermark_id = None
+    try:
+        bg_music_id = int(bg_music_id) if bg_music_id is not None else None
+    except (TypeError, ValueError):
+        bg_music_id = None
+
+    return watermark_id, _asset_path(watermark_id), bg_music_id, _asset_path(bg_music_id)
+
+
 @celery_app.task(bind=True, name="worker.tasks.video_pipeline.run_video_pipeline")
 def run_video_pipeline(self, job_id: str) -> dict:
     """
@@ -90,6 +185,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
     flags = FeatureFlags()
     db = SyncSessionLocal()()
     job: Job | None = None
+    work_dir: Path | None = None
 
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
@@ -124,6 +220,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
         elif not script_text:
             script_text = job.title  # fallback
 
+        # Accumulated warnings for result_quality classification at Step 10.
+        _warnings: list[str] = []
+
         # ── Step 4: TTS ────────────────────────────────────────────────
         audio_path: Path | None = None
         if flags.is_enabled("tts"):
@@ -138,17 +237,33 @@ def run_video_pipeline(self, job_id: str) -> dict:
                         _run_async(tts_provider.synthesize(script_text, voice, str(audio_out)))
                         audio_path = audio_out
                         _append_log(db, job, f"TTS audio: {audio_path}")
+                        job.output_metadata = {
+                            **(job.output_metadata or {}),
+                            "tts_status": "success",
+                        }
+                        db.commit()
                     except Exception as tts_exc:
                         tts_error = f"TTS provider {type(tts_provider).__name__} failed: {tts_exc}"
                         _append_log(db, job, f"TTS warning: {tts_error} – continuing without audio")
                         log.warning("tts_failed", provider=type(tts_provider).__name__, error=str(tts_exc))
+                        _warnings.append(tts_error)
                         job.output_metadata = {
                             **(job.output_metadata or {}),
+                            "tts_status": "failed",
                             "tts_warning": tts_error,
                         }
                         db.commit()
                 else:
                     _append_log(db, job, "TTS skipped: no provider configured")
+                    log.warning("tts_skipped", reason="no_provider_configured")
+                    _tts_skip_msg = "TTS was skipped. No provider is configured. Video will render without voiceover."
+                    _warnings.append(_tts_skip_msg)
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "tts_status": "skipped",
+                        "tts_warning": _tts_skip_msg,
+                    }
+                    db.commit()
             else:
                 audio_path = audio_out
                 _append_log(db, job, f"TTS audio (dry run): {audio_path}")
@@ -160,27 +275,89 @@ def run_video_pipeline(self, job_id: str) -> dict:
             if not job.dry_run:
                 media_dir = work_dir / "media"
                 media_dir.mkdir(exist_ok=True)
-                from worker.modules.stock_media.local_provider import LocalMediaProvider
-                provider = LocalMediaProvider()
-                assets = provider.fetch(query=job.title, count=3, output_dir=str(media_dir))
+                from worker.modules.stock_media.selector import StockMediaSelector
+
+                # Build search query from script text → topic → job title
+                search_query = (
+                    script_text
+                    or _resolve_topic(input_data)
+                    or job.title
+                )
+                selector = StockMediaSelector()
+                assets, stock_provider = selector.fetch(
+                    query=search_query,
+                    count=3,
+                    output_dir=str(media_dir),
+                )
                 media_clips = [Path(a.path) for a in assets]
-            _append_log(db, job, f"Stock media clips: {len(media_clips)}")
+                _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider}")
+                if stock_provider == "placeholder":
+                    _stock_warn = "Stock media: no real clips available. Placeholder visuals were used."
+                    _warnings.append(_stock_warn)
+                job.output_metadata = {
+                    **(job.output_metadata or {}),
+                    "stock_provider": stock_provider,
+                    "clip_sources": [a.source for a in assets],
+                }
+                db.commit()
+            else:
+                _append_log(db, job, "Stock media skipped (dry run)")
 
         # ── Step 6: Captions ───────────────────────────────────────────
         srt_path: Path | None = None
         if flags.is_enabled("captions") and audio_path and not job.dry_run:
-            _append_log(db, job, "Generating captions with Whisper")
-            try:
-                from worker.modules.captions.whisper_provider import WhisperCaptionProvider
-                caption_provider = WhisperCaptionProvider()
-                caption_result = caption_provider.transcribe(str(audio_path), str(work_dir))
-                srt_path = Path(caption_result.srt_path) if caption_result.srt_path else None
-                _append_log(db, job, f"Captions: {srt_path}")
-            except Exception as exc:
-                _append_log(db, job, f"Captions skipped: {exc}")
+            from worker.modules.captions.whisper_provider import WhisperCaptionProvider
+
+            _cap_skip_reason: str | None = None
+            if not settings.WHISPER_ENABLED:
+                _cap_skip_reason = "Captions skipped: WHISPER_ENABLED=false"
+            elif not WhisperCaptionProvider.is_available():
+                _cap_skip_reason = (
+                    "Captions skipped: faster-whisper is not installed. "
+                    "Install it with: pip install faster-whisper"
+                )
+
+            if _cap_skip_reason:
+                _append_log(db, job, _cap_skip_reason)
+                _warnings.append(_cap_skip_reason)
+                job.output_metadata = {
+                    **(job.output_metadata or {}),
+                    "caption_status": "skipped",
+                    "caption_warning": _cap_skip_reason,
+                }
+                db.commit()
+            else:
+                _append_log(db, job, "Generating captions with Whisper")
+                try:
+                    caption_provider = WhisperCaptionProvider(
+                        model_size=settings.WHISPER_MODEL_SIZE,
+                        device=settings.WHISPER_DEVICE,
+                    )
+                    caption_result = caption_provider.transcribe(str(audio_path), str(work_dir))
+                    srt_path = Path(caption_result.srt_path) if caption_result.srt_path else None
+                    _append_log(db, job, f"Captions: {srt_path}")
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "caption_status": "success",
+                    }
+                    db.commit()
+                except Exception as exc:
+                    _cap_warn = f"Captions were skipped: {exc}"
+                    _append_log(db, job, f"Captions skipped: {exc}")
+                    _warnings.append(_cap_warn)
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "caption_status": "failed",
+                        "caption_warning": _cap_warn,
+                    }
+                    db.commit()
 
         # ── Step 7: Build video ────────────────────────────────────────
         output_path: Path | None = None
+        caption_style = _resolve_caption_style(input_data)
+        watermark_asset_id, watermark_path, bg_music_asset_id, bg_music_path = (
+            _resolve_brand_assets(db, input_data, job)
+        )
         if flags.is_enabled("core_video"):
             _append_log(db, job, "Building video with FFmpeg")
             job.status = JobStatus.rendering
@@ -199,7 +376,30 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     srt_path=srt_path,
                     output_path=output_path,
                     use_nvenc=settings.NVIDIA_NVENC_ENABLED,
+                    caption_style=caption_style,
+                    watermark_path=watermark_path,
+                    bg_music_path=bg_music_path,
                 )
+                job.output_metadata = {
+                    **(job.output_metadata or {}),
+                    "caption_style": caption_style,
+                    "watermark_asset_id": watermark_asset_id,
+                    "bg_music_asset_id": bg_music_asset_id,
+                }
+                db.commit()
+
+                # Extract thumbnail from the built video.
+                thumbnail_path = output_dir / f"{job_id}_thumb.jpg"
+                try:
+                    builder.extract_thumbnail(output_path, thumbnail_path)
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "thumbnail_path": str(thumbnail_path),
+                    }
+                    db.commit()
+                    _append_log(db, job, f"Thumbnail: {thumbnail_path}")
+                except Exception as thumb_exc:
+                    _append_log(db, job, f"Thumbnail generation skipped: {thumb_exc}")
             _append_log(db, job, f"Video built: {output_path}")
 
         # ── Step 8: Validate ───────────────────────────────────────────
@@ -226,14 +426,37 @@ def run_video_pipeline(self, job_id: str) -> dict:
             _append_log(db, job, f"Export URL: {upload_url}")
 
         # ── Step 10: Done ──────────────────────────────────────────────
+        # Classify result quality from accumulated warnings and metadata.
+        # partial  → TTS or captions were missing (content gap)
+        # fallback → only placeholder stock visuals were used
+        # complete → no warnings
+        _partial_prefixes = ("TTS", "Captions")
+        _is_partial = any(
+            any(w.startswith(prefix) for prefix in _partial_prefixes) for w in _warnings
+        )
+        _current_meta = job.output_metadata or {}
+        _is_fallback = _current_meta.get("stock_provider") == "placeholder"
+        if _is_partial:
+            _result_quality = "partial"
+        elif _is_fallback:
+            _result_quality = "fallback"
+        else:
+            _result_quality = "complete"
+
         job.status = JobStatus.completed
         job.completed_at = datetime.now(timezone.utc)
         if output_path:
             job.output_path = str(output_path)
-        job.output_metadata = {"upload_url": upload_url}
+        job.output_metadata = {
+            **(job.output_metadata or {}),
+            "upload_url": upload_url,
+            "result_quality": _result_quality,
+            "warnings": _warnings,
+        }
         _append_log(db, job, "Pipeline completed")
         db.commit()
         log.info("pipeline_completed")
+        _cleanup_work_dir(work_dir, job_id)
         return {"status": "completed", "job_id": job_id}
 
     except Exception as exc:
@@ -244,6 +467,13 @@ def run_video_pipeline(self, job_id: str) -> dict:
             _append_log(db, job, f"ERROR: {exc}\n{tb}")
             db.commit()
         logger.exception("pipeline_failed", job_id=job_id, error=str(exc))
+        # Clean up the work directory unless the operator wants to keep it for debugging.
+        if work_dir is not None:
+            _cleanup_work_dir(
+                work_dir,
+                job_id,
+                keep=settings.DEBUG_KEEP_FAILED_WORKDIR,
+            )
         # Only retry on transient infrastructure errors (network / OS / DB IO).
         # Logic errors (missing binary, bad config, invalid script) should not
         # be retried automatically – they will fail again immediately.

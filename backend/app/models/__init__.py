@@ -5,3 +5,4 @@ from app.models.job import Job  # noqa: F401
 from app.models.project import Project  # noqa: F401
 from app.models.topic import Topic  # noqa: F401
 from app.models.asset import Asset  # noqa: F401
+from app.models.webhook_log import WebhookLog  # noqa: F401
