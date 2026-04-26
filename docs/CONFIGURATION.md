@@ -86,10 +86,27 @@ produces a structured template script).
 
 ## Caption / Transcription
 
+`faster-whisper` is an **optional** dependency.  The API server starts and all
+other pipeline steps work normally without it.  When Whisper is unavailable the
+caption step is skipped and `caption_status: "skipped"` / `caption_warning` are
+written to `output_metadata` so the UI can surface the reason.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `WHISPER_ENABLED` | `true` | Enable Whisper caption generation. Set to `false` to skip captions without installing `faster-whisper`. |
 | `WHISPER_MODEL_SIZE` | `base` | faster-whisper model size: `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `WHISPER_DEVICE` | `cpu` | Compute device: `cpu` or `cuda` |
+
+### Installing faster-whisper (optional)
+
+```bash
+pip install faster-whisper
+```
+
+`faster-whisper` requires `ctranslate2`.  A compatible CPU is sufficient for
+all model sizes; a CUDA-capable GPU dramatically speeds up `medium` and above.
+If the package cannot be imported at startup, a `whisper_unavailable` warning is
+logged so operators know immediately that captions will be skipped.
 
 ## Stock Media
 

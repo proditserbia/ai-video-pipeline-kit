@@ -58,10 +58,28 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("admin_seed_failed", error=str(exc))
 
+    # Whisper capability check – log a clear warning so operators know immediately
+    # if captions are enabled but the dependency is missing.
+    if app_settings.WHISPER_ENABLED:
+        try:
+            from worker.modules.captions.whisper_provider import WhisperCaptionProvider
+            if not WhisperCaptionProvider.is_available():
+                logger.warning(
+                    "whisper_unavailable",
+                    detail=(
+                        "WHISPER_ENABLED=true but faster-whisper could not be imported. "
+                        "Caption generation will be skipped for all jobs. "
+                        "Install it with: pip install faster-whisper"
+                    ),
+                )
+            else:
+                logger.info("whisper_available", model_size=app_settings.WHISPER_MODEL_SIZE)
+        except Exception as exc:
+            logger.warning("whisper_check_failed", error=str(exc))
+
     logger.info("startup_complete")
     yield
     logger.info("shutdown")
-
 
 def create_app() -> FastAPI:
     app = FastAPI(

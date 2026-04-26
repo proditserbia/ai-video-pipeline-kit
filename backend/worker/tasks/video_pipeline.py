@@ -306,17 +306,51 @@ def run_video_pipeline(self, job_id: str) -> dict:
         # ── Step 6: Captions ───────────────────────────────────────────
         srt_path: Path | None = None
         if flags.is_enabled("captions") and audio_path and not job.dry_run:
-            _append_log(db, job, "Generating captions with Whisper")
-            try:
-                from worker.modules.captions.whisper_provider import WhisperCaptionProvider
-                caption_provider = WhisperCaptionProvider()
-                caption_result = caption_provider.transcribe(str(audio_path), str(work_dir))
-                srt_path = Path(caption_result.srt_path) if caption_result.srt_path else None
-                _append_log(db, job, f"Captions: {srt_path}")
-            except Exception as exc:
-                _cap_warn = f"Captions were skipped: {exc}"
-                _append_log(db, job, f"Captions skipped: {exc}")
-                _warnings.append(_cap_warn)
+            from worker.modules.captions.whisper_provider import WhisperCaptionProvider
+
+            _cap_skip_reason: str | None = None
+            if not settings.WHISPER_ENABLED:
+                _cap_skip_reason = "Captions skipped: WHISPER_ENABLED=false"
+            elif not WhisperCaptionProvider.is_available():
+                _cap_skip_reason = (
+                    "Captions skipped: faster-whisper is not installed. "
+                    "Install it with: pip install faster-whisper"
+                )
+
+            if _cap_skip_reason:
+                _append_log(db, job, _cap_skip_reason)
+                _warnings.append(_cap_skip_reason)
+                job.output_metadata = {
+                    **(job.output_metadata or {}),
+                    "caption_status": "skipped",
+                    "caption_warning": _cap_skip_reason,
+                }
+                db.commit()
+            else:
+                _append_log(db, job, "Generating captions with Whisper")
+                try:
+                    caption_provider = WhisperCaptionProvider(
+                        model_size=settings.WHISPER_MODEL_SIZE,
+                        device=settings.WHISPER_DEVICE,
+                    )
+                    caption_result = caption_provider.transcribe(str(audio_path), str(work_dir))
+                    srt_path = Path(caption_result.srt_path) if caption_result.srt_path else None
+                    _append_log(db, job, f"Captions: {srt_path}")
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "caption_status": "success",
+                    }
+                    db.commit()
+                except Exception as exc:
+                    _cap_warn = f"Captions were skipped: {exc}"
+                    _append_log(db, job, f"Captions skipped: {exc}")
+                    _warnings.append(_cap_warn)
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "caption_status": "failed",
+                        "caption_warning": _cap_warn,
+                    }
+                    db.commit()
 
         # ── Step 7: Build video ────────────────────────────────────────
         output_path: Path | None = None

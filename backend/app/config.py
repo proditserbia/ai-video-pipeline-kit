@@ -63,10 +63,13 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str | None = None
     S3_BUCKET: str | None = None
 
+    # Caption / Transcription
+    WHISPER_ENABLED: bool = True
+    WHISPER_MODEL_SIZE: str = "base"
+    WHISPER_DEVICE: str = "cpu"
+
     # GPU
     NVIDIA_NVENC_ENABLED: bool = False
-
-    # Feature flags (JSON string or dict)
     FEATURE_FLAGS: dict[str, Any] = {
         "core_video": True,
         "ai_scripts": True,

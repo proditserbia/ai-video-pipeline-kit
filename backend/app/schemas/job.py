@@ -129,6 +129,18 @@ class JobResponse(JobBase):
 
     @computed_field  # type: ignore[misc]
     @property
+    def caption_status(self) -> str | None:
+        """Caption outcome: 'success', 'skipped', or 'failed'."""
+        return (self.output_metadata or {}).get("caption_status")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def caption_warning(self) -> str | None:
+        """Human-readable caption warning when status is 'skipped' or 'failed'."""
+        return (self.output_metadata or {}).get("caption_warning")
+
+    @computed_field  # type: ignore[misc]
+    @property
     def result_quality(self) -> str | None:
         """Overall quality of this job's output: 'complete', 'partial', or 'fallback'."""
         return (self.output_metadata or {}).get("result_quality")
