@@ -30,6 +30,19 @@ export type JobStatus = 'pending' | 'processing' | 'rendering' | 'uploading' | '
 export type CaptionStyle = 'none' | 'basic' | 'bold' | 'karaoke'
 export type TopicStatus = 'pending' | 'approved' | 'rejected' | 'used'
 
+export interface ValidationResult {
+  passed: boolean
+  width: number
+  height: number
+  duration: number
+  has_audio: boolean
+  video_codec: string
+  audio_codec: string
+  file_size_bytes: number
+  errors: string[]
+  warnings: string[]
+}
+
 export interface Job {
   id: string
   project_id: number | null
@@ -45,7 +58,7 @@ export interface Job {
   error_message?: string | null
   retry_count: number
   celery_task_id?: string | null
-  validation_result?: Record<string, unknown> | null
+  validation_result?: ValidationResult | null
   logs: string[]
   created_at: string
   updated_at: string

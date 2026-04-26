@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { formatDate } from '@/lib/utils'
-import { ArrowLeft, RefreshCw, XCircle, Download } from 'lucide-react'
+import { ArrowLeft, RefreshCw, XCircle, Download, CheckCircle, AlertTriangle } from 'lucide-react'
 
 export default function JobDetailPage() {
   const params = useParams()
@@ -117,6 +117,77 @@ export default function JobDetailPage() {
           <CardHeader><CardTitle>Script</CardTitle></CardHeader>
           <CardContent>
             <pre className="whitespace-pre-wrap text-sm text-gray-300">{job.script}</pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {job.validation_result && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Output Validation
+              {job.validation_result.passed ? (
+                <span className="flex items-center gap-1 text-xs font-normal text-green-400">
+                  <CheckCircle className="h-3.5 w-3.5" />Passed
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-xs font-normal text-red-400">
+                  <AlertTriangle className="h-3.5 w-3.5" />Failed
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-gray-400">Has Audio</p>
+                <p className={`mt-1 text-sm font-medium ${job.validation_result.has_audio ? 'text-green-400' : 'text-red-400'}`}>
+                  {job.validation_result.has_audio ? 'Yes' : 'No'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Resolution</p>
+                <p className="mt-1 text-sm font-medium text-white">
+                  {job.validation_result.width && job.validation_result.height
+                    ? `${job.validation_result.width}×${job.validation_result.height}`
+                    : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Duration</p>
+                <p className="mt-1 text-sm font-medium text-white">
+                  {job.validation_result.duration ? `${job.validation_result.duration.toFixed(1)}s` : '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">File Size</p>
+                <p className="mt-1 text-sm font-medium text-white">
+                  {job.validation_result.file_size_bytes
+                    ? `${(job.validation_result.file_size_bytes / 1024 / 1024).toFixed(1)} MB`
+                    : '—'}
+                </p>
+              </div>
+            </div>
+
+            {job.validation_result.warnings.length > 0 && (
+              <div className="space-y-1">
+                {job.validation_result.warnings.map((w, i) => (
+                  <Alert key={`vwarn-${i}`} variant="warning">
+                    <AlertDescription>{w}</AlertDescription>
+                  </Alert>
+                ))}
+              </div>
+            )}
+
+            {job.validation_result.errors.length > 0 && (
+              <div className="space-y-1">
+                {job.validation_result.errors.map((e, i) => (
+                  <Alert key={`verr-${i}`} variant="destructive">
+                    <AlertDescription>{e}</AlertDescription>
+                  </Alert>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
