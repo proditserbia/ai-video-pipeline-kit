@@ -44,7 +44,18 @@ Browser (Next.js :3000) → FastAPI Backend (:8000) → PostgreSQL + Redis
 - [Configuration](./docs/CONFIGURATION.md)
 - [Modules](./docs/MODULES.md)
 - [API](./docs/API.md)
+- [Production Deployment](./docs/PRODUCTION.md)
 - [Troubleshooting](./docs/TROUBLESHOOTING.md)
+
+## Production Readiness Check
+
+Before going live, validate that all services and dependencies are reachable and correctly configured:
+
+```bash
+python scripts/check_production_readiness.py
+```
+
+Prints a PASS / WARN / FAIL table for PostgreSQL, Redis, FFmpeg, TTS, stock media, storage, Whisper, and secret-key hygiene.  Exits `1` on any failure.  See [docs/PRODUCTION.md](./docs/PRODUCTION.md#9-production-readiness-check) for full details.
 
 ## License
 
