@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from celery.signals import worker_ready
 
 from app.config import settings
 
@@ -28,3 +29,9 @@ celery_app.conf.update(
         "worker.tasks.scheduled.*": {"queue": "scheduled"},
     },
 )
+
+
+@worker_ready.connect
+def log_tts_config_on_worker_ready(**kwargs):
+    from worker.modules.tts.selector import log_tts_config
+    log_tts_config()

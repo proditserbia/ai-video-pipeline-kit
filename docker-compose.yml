@@ -47,6 +47,8 @@ services:
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Adm1n$$ecure42!}
       - STORAGE_PATH=/storage
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
     volumes:
       - storage_data:/storage
     ports:
@@ -70,6 +72,12 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-change_me_in_production_min_32_chars_!!}
       - STORAGE_PATH=/storage
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_TTS_MODEL=${OPENAI_TTS_MODEL:-tts-1}
+      - COQUI_TTS_ENABLED=${COQUI_TTS_ENABLED:-true}
+      - COQUI_TTS_URL=${COQUI_TTS_URL:-http://coqui-tts:5002}
+      - EDGE_TTS_ENABLED=${EDGE_TTS_ENABLED:-false}
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-void}
     volumes:
       - storage_data:/storage

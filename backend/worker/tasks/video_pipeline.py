@@ -230,8 +230,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
             voice = _resolve_voice(input_data)
             audio_out = work_dir / "voice.mp3"
             if not job.dry_run:
-                from worker.modules.tts.selector import get_tts_provider
+                from worker.modules.tts.selector import get_tts_provider, get_tts_provider_name
                 tts_provider = get_tts_provider()
+                _append_log(db, job, f"TTS provider selected: {get_tts_provider_name(tts_provider)}")
                 if tts_provider is not None:
                     try:
                         _run_async(tts_provider.synthesize(script_text, voice, str(audio_out)))
