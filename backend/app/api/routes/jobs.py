@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -211,6 +212,48 @@ async def stream_logs(
         yield job.logs or ""
 
     return StreamingResponse(log_generator(), media_type="text/plain")
+
+
+@router.get("/{job_id}/download")
+async def download_job_output(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    from app.config import settings as app_settings
+
+    job = await _get_job_or_404(job_id, current_user.id, db)
+
+    if not job.output_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No output file available for this job",
+        )
+
+    storage_root = Path(app_settings.STORAGE_PATH).resolve()
+    file_path = Path(job.output_path).resolve()
+
+    # Ensure the resolved path stays within the configured storage root
+    try:
+        file_path.relative_to(storage_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Output file not found on disk",
+        )
+
+    filename = file_path.name or f"{job.title}.mp4"
+    return FileResponse(
+        path=str(file_path),
+        media_type="video/mp4",
+        filename=filename,
+    )
 
 
 async def _get_job_or_404(job_id: str, user_id: int, db: AsyncSession) -> Job:

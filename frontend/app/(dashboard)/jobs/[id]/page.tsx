@@ -2,7 +2,7 @@
 import { useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { useJob, useRetryJob, useCancelJob } from '@/hooks/useJobs'
+import { useJob, useRetryJob, useCancelJob, useDownloadJob } from '@/hooks/useJobs'
 import { useQueryClient } from '@tanstack/react-query'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
 import JobLogViewer from '@/components/jobs/JobLogViewer'
@@ -19,6 +19,7 @@ export default function JobDetailPage() {
   const { data: job, isLoading, error } = useJob(id)
   const retryJob = useRetryJob()
   const cancelJob = useCancelJob()
+  const downloadJob = useDownloadJob()
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -63,10 +64,13 @@ export default function JobDetailPage() {
             </Button>
           )}
           {job.output_url && (
-            <Button asChild size="sm" variant="outline">
-              <a href={job.output_url} target="_blank" rel="noopener noreferrer">
-                <Download className="mr-2 h-4 w-4" />Download
-              </a>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => downloadJob.mutate(job)}
+              isLoading={downloadJob.isPending}
+            >
+              <Download className="mr-2 h-4 w-4" />Download
             </Button>
           )}
         </div>
