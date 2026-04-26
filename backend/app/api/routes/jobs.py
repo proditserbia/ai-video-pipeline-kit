@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -109,16 +110,27 @@ async def create_job(
 
     # Queue Celery task
     try:
-        from worker.celery_app import celery_app
         from worker.tasks.video_pipeline import run_video_pipeline
 
         task = run_video_pipeline.apply_async(args=[job.id])
         job.celery_task_id = task.id
         await db.commit()
         await db.refresh(job)
-    except Exception:
-        # Worker may not be available in test/dry-run scenarios
-        pass
+    except Exception as exc:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        error_msg = f"Celery dispatch failed: {exc}"
+        job.status = JobStatus.failed
+        job.error_message = error_msg
+        job.logs = f"[{timestamp}] {error_msg}\n"
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Failed to queue the video pipeline task. "
+                "The task queue (Redis/Celery) may be unavailable. "
+                f"Error: {exc}"
+            ),
+        )
 
     return JobResponse.model_validate(job)
 

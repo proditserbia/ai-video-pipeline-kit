@@ -2,8 +2,26 @@ from __future__ import annotations
 
 import os
 import tempfile
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Celery mock – prevent real broker calls in every test that creates a job.
+# The failure test overrides this with a side_effect.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def mock_celery_dispatch():
+    """Patch apply_async globally so tests never touch a real Redis broker."""
+    mock_task = MagicMock()
+    mock_task.id = "mock-celery-task-id"
+    with patch(
+        "worker.tasks.video_pipeline.run_video_pipeline.apply_async",
+        return_value=mock_task,
+    ):
+        yield mock_task
 
 
 @pytest.mark.asyncio
@@ -199,4 +217,49 @@ async def test_download_unauthorized_user_cannot_access(client, session_factory)
     other_headers = {"Authorization": f"Bearer {other_token}"}
     resp = await client.get(f"/api/v1/jobs/{job_id}/download", headers=other_headers)
     assert resp.status_code == 404  # job not found for this user (ownership check)
+
+
+# ---------------------------------------------------------------------------
+# Celery dispatch failure
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_job_celery_dispatch_failure_returns_503(
+    client, admin_token, session_factory
+):
+    """When apply_async raises, the endpoint must return 503 and the job must
+    be persisted with status='failed' and a clear error message."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    with patch(
+        "worker.tasks.video_pipeline.run_video_pipeline.apply_async",
+        side_effect=Exception("Redis connection refused"),
+    ):
+        response = await client.post(
+            "/api/jobs",
+            json={"title": "Dispatch Fail Job"},
+            headers=headers,
+        )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "Redis connection refused" in detail
+    assert "task queue" in detail.lower() or "celery" in detail.lower()
+
+    # Verify the job row was written to the DB with status=failed
+    from sqlalchemy import select
+    from app.models.job import Job, JobStatus
+
+    async with session_factory() as db:
+        result = await db.execute(
+            select(Job).where(Job.title == "Dispatch Fail Job")
+        )
+        failed_job = result.scalar_one_or_none()
+
+    assert failed_job is not None, "Job row must be persisted even on dispatch failure"
+    assert failed_job.status == JobStatus.failed
+    assert failed_job.error_message is not None
+    assert "Celery dispatch failed" in failed_job.error_message
+    assert failed_job.logs is not None
+    assert "Celery dispatch failed" in failed_job.logs
 
