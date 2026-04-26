@@ -51,7 +51,7 @@ export default function JobDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-white">{job.title}</h1>
             <JobStatusBadge status={job.status} />
-            {job.result_quality && job.result_quality !== 'complete' && (
+            {job.result_quality && (
               <ResultQualityBadge quality={job.result_quality} />
             )}
           </div>
@@ -100,6 +100,54 @@ export default function JobDetailPage() {
         <Alert variant="destructive">
           <AlertDescription>{job.error_message}</AlertDescription>
         </Alert>
+      )}
+
+      {job.result_quality && (
+        <Card>
+          <CardHeader><CardTitle>Quality Summary</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div>
+                <p className="text-xs text-gray-400">Overall Quality</p>
+                <div className="mt-1">
+                  <ResultQualityBadge quality={job.result_quality} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">TTS Audio</p>
+                <p className={`mt-1 text-sm font-medium ${
+                  job.tts_status === 'success' ? 'text-green-400'
+                  : job.tts_status === 'failed' ? 'text-red-400'
+                  : job.tts_status === 'skipped' ? 'text-yellow-400'
+                  : 'text-gray-400'
+                }`}>
+                  {job.tts_status ?? '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Captions</p>
+                <p className={`mt-1 text-sm font-medium ${
+                  job.caption_status === 'success' ? 'text-green-400'
+                  : job.caption_status === 'failed' ? 'text-red-400'
+                  : job.caption_status === 'skipped' ? 'text-yellow-400'
+                  : 'text-gray-400'
+                }`}>
+                  {job.caption_status ?? '—'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Stock Media</p>
+                <p className={`mt-1 text-sm font-medium ${
+                  (job.output_metadata?.stock_provider as string | undefined) === 'placeholder'
+                    ? 'text-orange-400'
+                    : 'text-white'
+                }`}>
+                  {(job.output_metadata?.stock_provider as string | undefined) ?? '—'}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {job.warnings && job.warnings.length > 0 && (

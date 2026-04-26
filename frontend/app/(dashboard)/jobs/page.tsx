@@ -106,7 +106,7 @@ export default function JobsPage() {
                       <TableCell className="font-medium">{job.title}</TableCell>
                       <TableCell><JobStatusBadge status={job.status} /></TableCell>
                       <TableCell>
-                        {job.result_quality && job.result_quality !== 'complete' ? (
+                        {job.result_quality ? (
                           <ResultQualityBadge quality={job.result_quality} />
                         ) : (
                           <span className="text-xs text-gray-500">—</span>
