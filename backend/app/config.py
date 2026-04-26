@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # Job settings
     MAX_JOB_RETRIES: int = 3
     DRY_RUN: bool = False
+    # When True, preserve the temp work directory for failed jobs (useful for debugging).
+    DEBUG_KEEP_FAILED_WORKDIR: bool = False
 
     # OpenAI / LLM
     OPENAI_API_KEY: str | None = None

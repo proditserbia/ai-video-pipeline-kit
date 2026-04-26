@@ -113,6 +113,23 @@ Leave API keys empty to fall back to auto-generated colour-block placeholder cli
 |----------|---------|-------------|
 | `MAX_JOB_RETRIES` | `3` | Maximum number of automatic retries for a failed job |
 | `DRY_RUN` | `false` | When `true`, jobs execute the full pipeline logic but skip FFmpeg rendering and uploads |
+| `DEBUG_KEEP_FAILED_WORKDIR` | `false` | When `true`, the temporary work directory for **failed** jobs is preserved on disk instead of deleted. Useful for debugging FFmpeg errors. |
+
+## Temp File Retention
+
+During each pipeline run, a temporary work directory is created at
+`$STORAGE_PATH/temp/<job_id>/`.  It holds the TTS audio, downloaded stock
+clips, and the generated SRT subtitle file.
+
+| Outcome | Default behaviour | Override |
+|---------|-------------------|---------|
+| **Job completed successfully** | Directory is deleted immediately after the job finishes | — |
+| **Job failed** | Directory is deleted so disk space is not wasted | Set `DEBUG_KEEP_FAILED_WORKDIR=true` to keep it for debugging |
+| **Directory older than 24 h** | Removed by the `cleanup_temp_dirs` Celery beat task | Adjust the beat schedule in `worker/tasks/scheduled.py` if you need a different retention window |
+
+> **Tip** – if a completed job's output video was not uploaded to external storage,
+> it lives in `$STORAGE_PATH/outputs/<job_id>.mp4` and is **not** affected by temp
+> cleanup.  Only the intermediate files in `temp/` are removed.
 
 ## GPU Rendering (optional)
 

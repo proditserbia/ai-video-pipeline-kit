@@ -77,6 +77,28 @@ def _resolve_caption_style(input_data: dict) -> str | None:
     return None
 
 
+def _cleanup_work_dir(work_dir: Path, job_id: str, *, keep: bool = False) -> None:
+    """Remove the temporary job work directory.
+
+    Args:
+        work_dir: Path to the directory to remove.
+        job_id:   Used only for log context.
+        keep:     When *True* the directory is not deleted (debug mode).
+    """
+    import shutil
+
+    if keep:
+        logger.info("workdir_kept", job_id=job_id, path=str(work_dir))
+        return
+    if not work_dir.exists():
+        return
+    try:
+        shutil.rmtree(work_dir)
+        logger.info("workdir_cleaned", job_id=job_id, path=str(work_dir))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("workdir_cleanup_failed", job_id=job_id, path=str(work_dir), error=str(exc))
+
+
 def _resolve_brand_assets(db, input_data: dict, job) -> tuple:
     """Resolve watermark and background music file paths from asset IDs.
 
@@ -163,6 +185,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
     flags = FeatureFlags()
     db = SyncSessionLocal()()
     job: Job | None = None
+    work_dir: Path | None = None
 
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
@@ -386,6 +409,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
         _append_log(db, job, "Pipeline completed")
         db.commit()
         log.info("pipeline_completed")
+        _cleanup_work_dir(work_dir, job_id)
         return {"status": "completed", "job_id": job_id}
 
     except Exception as exc:
@@ -396,6 +420,13 @@ def run_video_pipeline(self, job_id: str) -> dict:
             _append_log(db, job, f"ERROR: {exc}\n{tb}")
             db.commit()
         logger.exception("pipeline_failed", job_id=job_id, error=str(exc))
+        # Clean up the work directory unless the operator wants to keep it for debugging.
+        if work_dir is not None:
+            _cleanup_work_dir(
+                work_dir,
+                job_id,
+                keep=settings.DEBUG_KEEP_FAILED_WORKDIR,
+            )
         # Only retry on transient infrastructure errors (network / OS / DB IO).
         # Logic errors (missing binary, bad config, invalid script) should not
         # be retried automatically – they will fail again immediately.
