@@ -7,7 +7,7 @@ export function useTopics(projectId?: number) {
     queryKey: ['topics', projectId],
     queryFn: async () => {
       const params = projectId ? `?project_id=${projectId}` : ''
-      const response = await api.get<PaginatedResponse<Topic>>(`/api/v1/topics${params}`)
+      const response = await api.get<PaginatedResponse<Topic>>(`topics${params}`)
       return response.data
     },
   })
@@ -17,7 +17,7 @@ export function useDiscoverTopics() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (projectId: number) => {
-      const response = await api.post<Topic[]>('/api/v1/topics/discover', { project_id: projectId })
+      const response = await api.post<Topic[]>('topics/discover', { project_id: projectId })
       return response.data
     },
     onSuccess: () => {
@@ -30,7 +30,7 @@ export function useApproveTopicMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: number) => {
-      const response = await api.post<Topic>(`/api/v1/topics/${id}/approve`)
+      const response = await api.post<Topic>(`topics/${id}/approve`)
       return response.data
     },
     onSuccess: () => {
@@ -43,7 +43,7 @@ export function useRejectTopicMutation() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: number) => {
-      const response = await api.post<Topic>(`/api/v1/topics/${id}/reject`)
+      const response = await api.post<Topic>(`topics/${id}/reject`)
       return response.data
     },
     onSuccess: () => {
