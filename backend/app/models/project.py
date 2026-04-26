@@ -15,6 +15,12 @@ class Project(Base):
     description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     brand_settings: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
     watermark_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    watermark_asset_id: Mapped[int | None] = mapped_column(
+        sa.Integer, sa.ForeignKey("assets.id", ondelete="SET NULL"), nullable=True
+    )
+    background_music_asset_id: Mapped[int | None] = mapped_column(
+        sa.Integer, sa.ForeignKey("assets.id", ondelete="SET NULL"), nullable=True
+    )
     fonts: Mapped[list | None] = mapped_column(sa.JSON, nullable=True)
     colors: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
     default_output_format: Mapped[str] = mapped_column(sa.String(16), default="mp4", nullable=False)

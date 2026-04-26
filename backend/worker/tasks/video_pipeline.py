@@ -67,7 +67,6 @@ def _resolve_voice(input_data: dict) -> str:
 
 
 def _resolve_caption_style(input_data: dict) -> str | None:
-    """Extract caption_style from either flat or nested input_data."""
     style = input_data.get("caption_style")
     if style:
         return style
@@ -76,6 +75,68 @@ def _resolve_caption_style(input_data: dict) -> str | None:
     if isinstance(captions_cfg, dict):
         return captions_cfg.get("style")
     return None
+
+
+def _resolve_brand_assets(db, input_data: dict, job) -> tuple:
+    """Resolve watermark and background music file paths from asset IDs.
+
+    Priority for each asset:
+      1. job ``input_data`` override (flat key or nested under ``"brand"``)
+      2. project-level ``watermark_asset_id`` / ``background_music_asset_id``
+
+    Returns ``(watermark_asset_id, watermark_path, bg_music_asset_id, bg_music_path)``.
+    Paths are ``Path | None``; IDs are ``int | None``.
+    Paths are returned regardless of whether the file currently exists on
+    disk; ``FFmpegVideoBuilder._compose`` skips missing files gracefully.
+    """
+    from pathlib import Path as _Path
+
+    from app.models.asset import Asset
+    from app.models.project import Project
+
+    def _asset_path(asset_id) -> _Path | None:
+        if asset_id is None:
+            return None
+        try:
+            asset_id = int(asset_id)
+        except (TypeError, ValueError):
+            return None
+        asset = db.query(Asset).filter(Asset.id == asset_id).first()
+        if asset and asset.file_path:
+            return _Path(asset.file_path)
+        return None
+
+    # Resolve IDs — input_data overrides project settings.
+    brand_cfg = input_data.get("brand") or {}
+    if not isinstance(brand_cfg, dict):
+        brand_cfg = {}
+
+    watermark_id = input_data.get("watermark_asset_id") or brand_cfg.get("watermark_asset_id")
+    bg_music_id = (
+        input_data.get("bg_music_asset_id")
+        or brand_cfg.get("bg_music_asset_id")
+    )
+
+    # Fall back to project-level brand settings.
+    if (not watermark_id or not bg_music_id) and job.project_id:
+        project = db.query(Project).filter(Project.id == job.project_id).first()
+        if project:
+            if not watermark_id:
+                watermark_id = project.watermark_asset_id
+            if not bg_music_id:
+                bg_music_id = project.background_music_asset_id
+
+    # Normalise IDs to int or None.
+    try:
+        watermark_id = int(watermark_id) if watermark_id is not None else None
+    except (TypeError, ValueError):
+        watermark_id = None
+    try:
+        bg_music_id = int(bg_music_id) if bg_music_id is not None else None
+    except (TypeError, ValueError):
+        bg_music_id = None
+
+    return watermark_id, _asset_path(watermark_id), bg_music_id, _asset_path(bg_music_id)
 
 
 @celery_app.task(bind=True, name="worker.tasks.video_pipeline.run_video_pipeline")
@@ -237,6 +298,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
         # ── Step 7: Build video ────────────────────────────────────────
         output_path: Path | None = None
         caption_style = _resolve_caption_style(input_data)
+        watermark_asset_id, watermark_path, bg_music_asset_id, bg_music_path = (
+            _resolve_brand_assets(db, input_data, job)
+        )
         if flags.is_enabled("core_video"):
             _append_log(db, job, "Building video with FFmpeg")
             job.status = JobStatus.rendering
@@ -256,10 +320,14 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     output_path=output_path,
                     use_nvenc=settings.NVIDIA_NVENC_ENABLED,
                     caption_style=caption_style,
+                    watermark_path=watermark_path,
+                    bg_music_path=bg_music_path,
                 )
                 job.output_metadata = {
                     **(job.output_metadata or {}),
                     "caption_style": caption_style,
+                    "watermark_asset_id": watermark_asset_id,
+                    "bg_music_asset_id": bg_music_asset_id,
                 }
                 db.commit()
             _append_log(db, job, f"Video built: {output_path}")

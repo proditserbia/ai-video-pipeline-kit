@@ -11,6 +11,8 @@ class ProjectBase(BaseModel):
     description: str | None = None
     brand_settings: dict[str, Any] | None = None
     watermark_path: str | None = None
+    watermark_asset_id: int | None = None
+    background_music_asset_id: int | None = None
     fonts: list[str] | None = None
     colors: dict[str, str] | None = None
     default_output_format: str = "mp4"
@@ -29,6 +31,8 @@ class ProjectUpdate(BaseModel):
     description: str | None = None
     brand_settings: dict[str, Any] | None = None
     watermark_path: str | None = None
+    watermark_asset_id: int | None = None
+    background_music_asset_id: int | None = None
     fonts: list[str] | None = None
     colors: dict[str, str] | None = None
     default_output_format: str | None = None
