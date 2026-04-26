@@ -11,6 +11,19 @@ logger = structlog.get_logger(__name__)
 WIDTH = 1080
 HEIGHT = 1920
 
+# Mapping from caption_style names to libass force_style strings.
+# Each value is passed verbatim to the FFmpeg subtitles=:force_style= option.
+CAPTION_STYLE_MAP: dict[str, str] = {
+    "basic": "FontSize=36,PrimaryColour=&H00FFFFFF,Outline=1,Shadow=0,Alignment=2",
+    "bold_center": "FontSize=44,Bold=1,PrimaryColour=&H00FFFFFF,Outline=2,Shadow=0,Alignment=2",
+    "boxed": "FontSize=36,PrimaryColour=&H00FFFFFF,BackColour=&H80000000,BorderStyle=3,Outline=0,Shadow=0,Alignment=2",
+    "large_bottom": "FontSize=56,Bold=1,PrimaryColour=&H00FFFFFF,Outline=2,Shadow=1,Alignment=2,MarginV=40",
+    "karaoke_placeholder": "FontSize=40,PrimaryColour=&H0000FFFF,Outline=2,Shadow=0,Alignment=2",
+}
+
+# Fallback style used when caption_style is None / unrecognised.
+_DEFAULT_CAPTION_STYLE = "basic"
+
 
 def _escape_srt_path(path: str) -> str:
     """
@@ -24,6 +37,18 @@ def _escape_srt_path(path: str) -> str:
     for ch in (":", "'", "[", "]", ";", ","):
         path = path.replace(ch, "\\" + ch)
     return path
+
+
+def _escape_force_style(style: str) -> str:
+    """
+    Escape a force_style value for safe embedding inside the FFmpeg
+    subtitles filter argument (subtitles='path':force_style='value').
+
+    The outer context is already single-quoted by the caller, so we only
+    need to escape characters that would break the inner value:
+    backslash and single-quote.
+    """
+    return style.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -48,6 +73,7 @@ class FFmpegVideoBuilder:
         watermark_path: Path | None = None,
         bg_music_path: Path | None = None,
         bg_music_volume: float = 0.15,
+        caption_style: str | None = None,
     ) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -65,6 +91,7 @@ class FFmpegVideoBuilder:
             watermark_path=watermark_path,
             bg_music_path=bg_music_path,
             bg_music_volume=bg_music_volume,
+            caption_style=caption_style,
         )
         logger.info("video_built", output=str(output_path))
 
@@ -134,6 +161,7 @@ class FFmpegVideoBuilder:
         watermark_path: Path | None,
         bg_music_path: Path | None,
         bg_music_volume: float,
+        caption_style: str | None = None,
     ) -> Path:
         cmd: list[str] = ["ffmpeg", "-y", "-i", str(video)]
 
@@ -149,7 +177,13 @@ class FFmpegVideoBuilder:
 
         if srt_path and srt_path.exists():
             srt_escaped = _escape_srt_path(str(srt_path))
-            vf_parts.append(f"subtitles='{srt_escaped}'")
+            # Resolve force_style: use named style or fall back to default.
+            style_key = caption_style if caption_style in CAPTION_STYLE_MAP else _DEFAULT_CAPTION_STYLE
+            force_style_raw = CAPTION_STYLE_MAP[style_key]
+            force_style_escaped = _escape_force_style(force_style_raw)
+            vf_parts.append(
+                f"subtitles='{srt_escaped}':force_style='{force_style_escaped}'"
+            )
 
         if watermark_path and watermark_path.exists():
             cmd += ["-i", str(watermark_path)]

@@ -66,6 +66,18 @@ def _resolve_voice(input_data: dict) -> str:
     return voice or "en-US-AriaNeural"
 
 
+def _resolve_caption_style(input_data: dict) -> str | None:
+    """Extract caption_style from either flat or nested input_data."""
+    style = input_data.get("caption_style")
+    if style:
+        return style
+    # Headless API may nest it inside a captions config dict
+    captions_cfg = input_data.get("captions", {})
+    if isinstance(captions_cfg, dict):
+        return captions_cfg.get("style")
+    return None
+
+
 @celery_app.task(bind=True, name="worker.tasks.video_pipeline.run_video_pipeline")
 def run_video_pipeline(self, job_id: str) -> dict:
     """
@@ -224,6 +236,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
 
         # ── Step 7: Build video ────────────────────────────────────────
         output_path: Path | None = None
+        caption_style = _resolve_caption_style(input_data)
         if flags.is_enabled("core_video"):
             _append_log(db, job, "Building video with FFmpeg")
             job.status = JobStatus.rendering
@@ -242,7 +255,13 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     srt_path=srt_path,
                     output_path=output_path,
                     use_nvenc=settings.NVIDIA_NVENC_ENABLED,
+                    caption_style=caption_style,
                 )
+                job.output_metadata = {
+                    **(job.output_metadata or {}),
+                    "caption_style": caption_style,
+                }
+                db.commit()
             _append_log(db, job, f"Video built: {output_path}")
 
         # ── Step 8: Validate ───────────────────────────────────────────
@@ -273,9 +292,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
         # partial  → TTS or captions were missing (content gap)
         # fallback → only placeholder stock visuals were used
         # complete → no warnings
-        _partial_keywords = ("TTS", "Captions")
+        _partial_prefixes = ("TTS", "Captions")
         _is_partial = any(
-            any(kw in w for kw in _partial_keywords) for w in _warnings
+            any(w.startswith(prefix) for prefix in _partial_prefixes) for w in _warnings
         )
         _current_meta = job.output_metadata or {}
         _is_fallback = _current_meta.get("stock_provider") == "placeholder"
