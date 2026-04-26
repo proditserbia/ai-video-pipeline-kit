@@ -6,12 +6,12 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL
 if (!apiUrl) {
   console.warn(
     '[api] NEXT_PUBLIC_API_URL is not set. ' +
-    'Falling back to http://localhost:8000/api/v1 for development.'
+    'Requests may fail. Set NEXT_PUBLIC_API_URL as a build arg.'
   )
 }
 
 const api = axios.create({
-  baseURL: apiUrl || 'http://localhost:8000/api/v1',
+  baseURL: apiUrl,
   headers: {
     'Content-Type': 'application/json',
   },
