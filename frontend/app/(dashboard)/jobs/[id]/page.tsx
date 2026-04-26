@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useJob, useRetryJob, useCancelJob, useDownloadJob } from '@/hooks/useJobs'
 import { useQueryClient } from '@tanstack/react-query'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
+import ResultQualityBadge from '@/components/jobs/ResultQualityBadge'
 import JobLogViewer from '@/components/jobs/JobLogViewer'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -50,6 +51,9 @@ export default function JobDetailPage() {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-white">{job.title}</h1>
             <JobStatusBadge status={job.status} />
+            {job.result_quality && job.result_quality !== 'complete' && (
+              <ResultQualityBadge quality={job.result_quality} />
+            )}
           </div>
         </div>
         <div className="flex gap-2">
@@ -98,12 +102,14 @@ export default function JobDetailPage() {
         </Alert>
       )}
 
-      {(job.tts_status === 'skipped' || job.tts_status === 'failed') && (
-        <Alert variant="warning">
-          <AlertDescription>
-            {job.tts_warning || 'TTS was skipped. Video was rendered without voiceover.'}
-          </AlertDescription>
-        </Alert>
+      {job.warnings && job.warnings.length > 0 && (
+        <div className="space-y-2">
+          {job.warnings.map((w, i) => (
+            <Alert key={`warning-${i}`} variant="warning">
+              <AlertDescription>{w}</AlertDescription>
+            </Alert>
+          ))}
+        </div>
       )}
 
       {job.script && (
@@ -131,3 +137,4 @@ export default function JobDetailPage() {
     </div>
   )
 }
+

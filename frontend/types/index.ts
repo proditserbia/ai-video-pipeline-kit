@@ -59,6 +59,9 @@ export interface Job {
   // TTS outcome fields derived from output_metadata by the backend
   tts_status?: 'success' | 'skipped' | 'failed' | null
   tts_warning?: string | null
+  // Result quality and warnings derived from output_metadata by the backend
+  result_quality?: 'complete' | 'partial' | 'fallback' | null
+  warnings?: string[] | null
 }
 
 export interface Topic {

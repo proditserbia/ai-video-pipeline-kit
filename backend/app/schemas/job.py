@@ -127,6 +127,21 @@ class JobResponse(JobBase):
         """Human-readable TTS warning when status is 'skipped' or 'failed'."""
         return (self.output_metadata or {}).get("tts_warning")
 
+    @computed_field  # type: ignore[misc]
+    @property
+    def result_quality(self) -> str | None:
+        """Overall quality of this job's output: 'complete', 'partial', or 'fallback'."""
+        return (self.output_metadata or {}).get("result_quality")
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def warnings(self) -> list[str]:
+        """List of human-readable warnings accumulated during the pipeline run."""
+        v = (self.output_metadata or {}).get("warnings")
+        if isinstance(v, list):
+            return v
+        return []
+
 
 class JobListResponse(BaseModel):
     items: list[JobResponse]

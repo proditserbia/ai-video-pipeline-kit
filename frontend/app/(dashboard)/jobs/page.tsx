@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useJobs, useRetryJob, useCancelJob } from '@/hooks/useJobs'
 import { useProjects } from '@/hooks/useProjects'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
+import ResultQualityBadge from '@/components/jobs/ResultQualityBadge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
@@ -86,6 +87,7 @@ export default function JobsPage() {
                 <TableRow>
                   <TableHead>Title</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Quality</TableHead>
                   <TableHead>Project</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -94,7 +96,7 @@ export default function JobsPage() {
               <TableBody>
                 {jobs?.items?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-12 text-center text-gray-400">
+                    <TableCell colSpan={6} className="py-12 text-center text-gray-400">
                       No jobs found
                     </TableCell>
                   </TableRow>
@@ -103,6 +105,13 @@ export default function JobsPage() {
                     <TableRow key={job.id}>
                       <TableCell className="font-medium">{job.title}</TableCell>
                       <TableCell><JobStatusBadge status={job.status} /></TableCell>
+                      <TableCell>
+                        {job.result_quality && job.result_quality !== 'complete' ? (
+                          <ResultQualityBadge quality={job.result_quality} />
+                        ) : (
+                          <span className="text-xs text-gray-500">—</span>
+                        )}
+                      </TableCell>
                       <TableCell>#{job.project_id}</TableCell>
                       <TableCell>{formatRelativeDate(job.created_at)}</TableCell>
                       <TableCell>

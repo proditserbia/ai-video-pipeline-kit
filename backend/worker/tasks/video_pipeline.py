@@ -124,6 +124,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
         elif not script_text:
             script_text = job.title  # fallback
 
+        # Accumulated warnings for result_quality classification at Step 10.
+        _warnings: list[str] = []
+
         # ── Step 4: TTS ────────────────────────────────────────────────
         audio_path: Path | None = None
         if flags.is_enabled("tts"):
@@ -147,6 +150,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                         tts_error = f"TTS provider {type(tts_provider).__name__} failed: {tts_exc}"
                         _append_log(db, job, f"TTS warning: {tts_error} – continuing without audio")
                         log.warning("tts_failed", provider=type(tts_provider).__name__, error=str(tts_exc))
+                        _warnings.append(tts_error)
                         job.output_metadata = {
                             **(job.output_metadata or {}),
                             "tts_status": "failed",
@@ -156,10 +160,12 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 else:
                     _append_log(db, job, "TTS skipped: no provider configured")
                     log.warning("tts_skipped", reason="no_provider_configured")
+                    _tts_skip_msg = "TTS was skipped. No provider is configured. Video will render without voiceover."
+                    _warnings.append(_tts_skip_msg)
                     job.output_metadata = {
                         **(job.output_metadata or {}),
                         "tts_status": "skipped",
-                        "tts_warning": "TTS was skipped. No provider is configured. Video will render without voiceover.",
+                        "tts_warning": _tts_skip_msg,
                     }
                     db.commit()
             else:
@@ -189,6 +195,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 )
                 media_clips = [Path(a.path) for a in assets]
                 _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider}")
+                if stock_provider == "placeholder":
+                    _stock_warn = "Stock media: no real clips available. Placeholder visuals were used."
+                    _warnings.append(_stock_warn)
                 job.output_metadata = {
                     **(job.output_metadata or {}),
                     "stock_provider": stock_provider,
@@ -209,7 +218,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 srt_path = Path(caption_result.srt_path) if caption_result.srt_path else None
                 _append_log(db, job, f"Captions: {srt_path}")
             except Exception as exc:
+                _cap_warn = f"Captions were skipped: {exc}"
                 _append_log(db, job, f"Captions skipped: {exc}")
+                _warnings.append(_cap_warn)
 
         # ── Step 7: Build video ────────────────────────────────────────
         output_path: Path | None = None
@@ -258,11 +269,33 @@ def run_video_pipeline(self, job_id: str) -> dict:
             _append_log(db, job, f"Export URL: {upload_url}")
 
         # ── Step 10: Done ──────────────────────────────────────────────
+        # Classify result quality from accumulated warnings and metadata.
+        # partial  → TTS or captions were missing (content gap)
+        # fallback → only placeholder stock visuals were used
+        # complete → no warnings
+        _partial_keywords = ("TTS", "Captions")
+        _is_partial = any(
+            any(kw in w for kw in _partial_keywords) for w in _warnings
+        )
+        _current_meta = job.output_metadata or {}
+        _is_fallback = _current_meta.get("stock_provider") == "placeholder"
+        if _is_partial:
+            _result_quality = "partial"
+        elif _is_fallback:
+            _result_quality = "fallback"
+        else:
+            _result_quality = "complete"
+
         job.status = JobStatus.completed
         job.completed_at = datetime.now(timezone.utc)
         if output_path:
             job.output_path = str(output_path)
-        job.output_metadata = {**(job.output_metadata or {}), "upload_url": upload_url}
+        job.output_metadata = {
+            **(job.output_metadata or {}),
+            "upload_url": upload_url,
+            "result_quality": _result_quality,
+            "warnings": _warnings,
+        }
         _append_log(db, job, "Pipeline completed")
         db.commit()
         log.info("pipeline_completed")
