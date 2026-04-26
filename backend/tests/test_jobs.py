@@ -180,11 +180,11 @@ async def test_download_unauthorized_user_cannot_access(client, session_factory)
         other_token = create_access_token(subject=other_user.id)
 
     # Create a job as the first (admin) user
-    from app.core.security import create_access_token as cat
+    from app.core.security import create_access_token
     async with session_factory() as db:
         result = await db.execute(select(User).where(User.email == "test@example.com"))
         admin_user = result.scalar_one_or_none()
-    admin_token = cat(subject=admin_user.id)
+    admin_token = create_access_token(subject=admin_user.id)
 
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     create_resp = await client.post(

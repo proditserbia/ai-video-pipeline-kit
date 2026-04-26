@@ -248,7 +248,11 @@ async def download_job_output(
             detail="Output file not found on disk",
         )
 
-    filename = file_path.name or f"{job.title}.mp4"
+    filename = file_path.name
+    if not filename:
+        # Sanitize job title to produce a safe filename
+        safe_title = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in job.title)
+        filename = f"{safe_title.strip() or 'output'}.mp4"
     return FileResponse(
         path=str(file_path),
         media_type="video/mp4",
