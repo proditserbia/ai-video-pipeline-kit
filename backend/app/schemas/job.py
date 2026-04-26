@@ -136,6 +136,14 @@ class JobResponse(JobBase):
 
     @computed_field  # type: ignore[misc]
     @property
+    def thumbnail_url(self) -> str | None:
+        """Return the URL to fetch the job thumbnail, if one was generated."""
+        if not (self.output_metadata or {}).get("thumbnail_path"):
+            return None
+        return f"/api/v1/jobs/{self.id}/thumbnail"
+
+    @computed_field  # type: ignore[misc]
+    @property
     def tts_status(self) -> str | None:
         """TTS outcome: 'success', 'skipped', or 'failed'."""
         return (self.output_metadata or {}).get("tts_status")

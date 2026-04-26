@@ -54,6 +54,7 @@ export interface Job {
   max_retries: number
   output_path?: string | null
   output_url?: string | null
+  thumbnail_url?: string | null
   output_metadata?: Record<string, unknown> | null
   error_message?: string | null
   retry_count: number

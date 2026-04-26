@@ -387,6 +387,19 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     "bg_music_asset_id": bg_music_asset_id,
                 }
                 db.commit()
+
+                # Extract thumbnail from the built video.
+                thumbnail_path = output_dir / f"{job_id}_thumb.jpg"
+                try:
+                    builder.extract_thumbnail(output_path, thumbnail_path)
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "thumbnail_path": str(thumbnail_path),
+                    }
+                    db.commit()
+                    _append_log(db, job, f"Thumbnail: {thumbnail_path}")
+                except Exception as thumb_exc:
+                    _append_log(db, job, f"Thumbnail generation skipped: {thumb_exc}")
             _append_log(db, job, f"Video built: {output_path}")
 
         # ── Step 8: Validate ───────────────────────────────────────────

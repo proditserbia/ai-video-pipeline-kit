@@ -96,6 +96,20 @@ export default function JobDetailPage() {
         ))}
       </div>
 
+      {job.thumbnail_url && (
+        <Card>
+          <CardHeader><CardTitle>Preview</CardTitle></CardHeader>
+          <CardContent>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={job.thumbnail_url}
+              alt="Video thumbnail"
+              className="max-h-64 w-auto rounded-md object-contain"
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {job.error_message && (
         <Alert variant="destructive">
           <AlertDescription>{job.error_message}</AlertDescription>

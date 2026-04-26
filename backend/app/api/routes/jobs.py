@@ -285,6 +285,48 @@ async def download_job_output(
     )
 
 
+@router.get("/{job_id}/thumbnail")
+async def get_job_thumbnail(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    from app.config import settings as app_settings
+
+    job = await _get_job_or_404(job_id, current_user.id, db)
+
+    thumbnail_path_str = (job.output_metadata or {}).get("thumbnail_path")
+    if not thumbnail_path_str:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No thumbnail available for this job",
+        )
+
+    storage_root = Path(app_settings.STORAGE_PATH).resolve()
+    file_path = Path(thumbnail_path_str).resolve()
+
+    # Ensure the resolved path stays within the configured storage root
+    try:
+        file_path.relative_to(storage_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Thumbnail file not found on disk",
+        )
+
+    return FileResponse(
+        path=str(file_path),
+        media_type="image/jpeg",
+        filename=file_path.name,
+    )
+
+
 async def _get_job_or_404(job_id: str, user_id: int, db: AsyncSession) -> Job:
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == user_id)
