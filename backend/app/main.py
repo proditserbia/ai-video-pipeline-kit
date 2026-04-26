@@ -105,16 +105,21 @@ def create_app() -> FastAPI:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        # Pydantic v2 errors() may contain non-JSON-serializable objects (e.g. ValueError).
-        # Stringify each error's ctx values to ensure safe serialization.
-        errors = []
-        for err in exc.errors():
-            safe_err = dict(err)
-            if "ctx" in safe_err and isinstance(safe_err["ctx"], dict):
-                safe_err["ctx"] = {
-                    k: str(v) for k, v in safe_err["ctx"].items()
-                }
-            errors.append(safe_err)
+        # Pydantic v2 errors() may contain non-JSON-serializable objects such as
+        # bytes (raw request input) or Exception instances (ctx["error"]).
+        # Recursively sanitize the entire error structure before serializing.
+        def _sanitize(obj: object) -> object:
+            if isinstance(obj, bytes):
+                return obj.decode("utf-8", errors="replace")
+            if isinstance(obj, dict):
+                return {k: _sanitize(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [_sanitize(v) for v in obj]
+            if not isinstance(obj, (str, int, float, bool, type(None))):
+                return str(obj)
+            return obj
+
+        errors = [_sanitize(dict(err)) for err in exc.errors()]
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": errors},
