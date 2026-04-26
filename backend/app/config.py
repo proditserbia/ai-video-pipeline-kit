@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     WHISPER_MODEL_SIZE: str = "base"
     WHISPER_DEVICE: str = "cpu"
 
+    # CORS
+    # Space-separated or JSON-array list of allowed origins.
+    # Production default: only the deployed frontend.
+    # Development: override via .env, e.g.
+    #   CORS_ALLOWED_ORIGINS=["https://avpk.prodit.rs","http://localhost:3000","http://localhost:8000"]
+    CORS_ALLOWED_ORIGINS: list[str] = ["https://avpk.prodit.rs"]
+
     # GPU
     NVIDIA_NVENC_ENABLED: bool = False
     FEATURE_FLAGS: dict[str, Any] = {
@@ -78,6 +85,14 @@ class Settings(BaseSettings):
         "gpu_rendering": False,
         "cloud_storage": False,
     }
+
+    @field_validator("CORS_ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
 
     @field_validator("FEATURE_FLAGS", mode="before")
     @classmethod
