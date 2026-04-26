@@ -14,7 +14,7 @@ def test_default_settings():
     )
     assert s.ACCESS_TOKEN_EXPIRE_MINUTES == 30
     assert s.ALGORITHM == "HS256"
-    assert s.EDGE_TTS_ENABLED is True
+    assert s.EDGE_TTS_ENABLED is False
     assert s.COQUI_TTS_ENABLED is False
     assert s.MAX_JOB_RETRIES == 3
     assert s.DRY_RUN is False

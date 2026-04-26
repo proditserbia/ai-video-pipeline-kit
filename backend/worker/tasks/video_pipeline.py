@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,15 @@ import structlog
 from worker.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
+
+
+def _run_async(coro):
+    """Execute an async coroutine safely from a synchronous Celery task."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _append_log(db, job, line: str) -> None:
@@ -119,15 +129,27 @@ def run_video_pipeline(self, job_id: str) -> dict:
             voice = _resolve_voice(input_data)
             audio_out = work_dir / "voice.mp3"
             if not job.dry_run:
-                if settings.EDGE_TTS_ENABLED:
-                    from worker.modules.tts.edge_tts_provider import EdgeTTSProvider
-                    import asyncio
-                    tts = EdgeTTSProvider()
-                    asyncio.run(tts.synthesize(script_text, voice, str(audio_out)))
-                    audio_path = audio_out
+                from worker.modules.tts.selector import get_tts_provider
+                tts_provider = get_tts_provider()
+                if tts_provider is not None:
+                    try:
+                        _run_async(tts_provider.synthesize(script_text, voice, str(audio_out)))
+                        audio_path = audio_out
+                        _append_log(db, job, f"TTS audio: {audio_path}")
+                    except Exception as tts_exc:
+                        tts_error = f"TTS provider {type(tts_provider).__name__} failed: {tts_exc}"
+                        _append_log(db, job, f"TTS warning: {tts_error} – continuing without audio")
+                        log.warning("tts_failed", provider=type(tts_provider).__name__, error=str(tts_exc))
+                        job.output_metadata = {
+                            **(job.output_metadata or {}),
+                            "tts_warning": tts_error,
+                        }
+                        db.commit()
+                else:
+                    _append_log(db, job, "TTS skipped: no provider configured")
             else:
                 audio_path = audio_out
-            _append_log(db, job, f"TTS audio: {audio_path}")
+                _append_log(db, job, f"TTS audio (dry run): {audio_path}")
 
         # ── Step 5: Stock media ────────────────────────────────────────
         media_clips: list[Path] = []

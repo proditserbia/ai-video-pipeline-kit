@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
 
     # TTS
-    EDGE_TTS_ENABLED: bool = True
+    EDGE_TTS_ENABLED: bool = False
+    ELEVENLABS_API_KEY: str | None = None
+    OPENAI_TTS_MODEL: str = "tts-1"
     COQUI_TTS_ENABLED: bool = False
     COQUI_TTS_URL: str = "http://coqui-tts:5002"
 
