@@ -17,9 +17,13 @@ services:
       - "127.0.0.1:8000:8000"
 
   frontend:
+    build:
+      args:
+        # Next.js embeds NEXT_PUBLIC_* vars at build time — rebuild after changing
+        - NEXT_PUBLIC_API_URL=https://avpk.prodit.rs/api/v1
     environment:
       # Next.js reads this at BUILD TIME — rebuild the image after changing it
-      - NEXT_PUBLIC_API_URL=https://avpk.prodit.rs/api
+      - NEXT_PUBLIC_API_URL=https://avpk.prodit.rs/api/v1
     ports:
       # Bind only to loopback — block direct public access on port 3000
       - "127.0.0.1:3000:3000"

@@ -18,7 +18,7 @@ export function useJobs(filters: JobFilters = {}) {
       if (filters.status) params.set('status', filters.status)
       if (filters.page) params.set('page', String(filters.page))
       if (filters.size) params.set('size', String(filters.size))
-      const response = await api.get<PaginatedResponse<Job>>(`/api/v1/jobs?${params}`)
+      const response = await api.get<PaginatedResponse<Job>>(`jobs?${params}`)
       return response.data
     },
   })
@@ -28,7 +28,7 @@ export function useJob(id: number | string) {
   return useQuery({
     queryKey: ['jobs', id],
     queryFn: async () => {
-      const response = await api.get<Job>(`/api/v1/jobs/${id}`)
+      const response = await api.get<Job>(`jobs/${id}`)
       return response.data
     },
     enabled: !!id,
@@ -39,7 +39,7 @@ export function useJobStats() {
   return useQuery({
     queryKey: ['jobs', 'stats'],
     queryFn: async () => {
-      const response = await api.get<JobStats>('/api/v1/jobs/stats')
+      const response = await api.get<JobStats>('jobs/stats')
       return response.data
     },
   })
@@ -49,7 +49,7 @@ export function useCreateJob() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (data: CreateJobRequest) => {
-      const response = await api.post<Job>('/api/v1/jobs', data)
+      const response = await api.post<Job>('jobs', data)
       return response.data
     },
     onSuccess: () => {
@@ -62,7 +62,7 @@ export function useRetryJob() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      const response = await api.post<Job>(`/api/v1/jobs/${id}/retry`)
+      const response = await api.post<Job>(`jobs/${id}/retry`)
       return response.data
     },
     onSuccess: () => {
@@ -75,7 +75,7 @@ export function useCancelJob() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (id: string) => {
-      const response = await api.post<Job>(`/api/v1/jobs/${id}/cancel`)
+      const response = await api.post<Job>(`jobs/${id}/cancel`)
       return response.data
     },
     onSuccess: () => {

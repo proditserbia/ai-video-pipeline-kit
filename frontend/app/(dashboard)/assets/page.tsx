@@ -16,7 +16,7 @@ function useAssets(assetType?: string) {
     queryKey: ['assets', assetType],
     queryFn: async () => {
       const params = assetType ? `?asset_type=${assetType}` : ''
-      const response = await api.get<PaginatedResponse<Asset>>(`/api/v1/assets${params}`)
+      const response = await api.get<PaginatedResponse<Asset>>(`assets${params}`)
       return response.data
     },
   })
@@ -25,7 +25,7 @@ function useAssets(assetType?: string) {
 function useDeleteAsset() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (id: number) => { await api.delete(`/api/v1/assets/${id}`) },
+    mutationFn: async (id: number) => { await api.delete(`assets/${id}`) },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),
   })
 }
@@ -34,7 +34,7 @@ function useUploadAsset() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (formData: FormData) => {
-      const response = await api.post<Asset>('/api/v1/assets/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
+      const response = await api.post<Asset>('assets/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } })
       return response.data
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['assets'] }),

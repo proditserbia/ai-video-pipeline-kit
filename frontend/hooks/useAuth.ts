@@ -22,7 +22,7 @@ export function useAuth() {
   const isAuthenticated = typeof window !== 'undefined' ? !!getToken() : false
 
   const login = useCallback(async (credentials: LoginRequest) => {
-    const response = await api.post<LoginResponse>('/api/v1/auth/login', credentials)
+    const response = await api.post<LoginResponse>('auth/login', credentials)
     const { access_token, user: userData } = response.data
     setToken(access_token)
     setUser(userData)

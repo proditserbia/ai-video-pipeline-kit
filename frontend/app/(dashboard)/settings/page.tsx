@@ -8,10 +8,10 @@ import { CheckCircle, XCircle } from 'lucide-react'
 import type { FeatureFlags, CredentialStatus } from '@/types'
 
 function useFeatureFlags() {
-  return useQuery({ queryKey: ['settings', 'features'], queryFn: async () => (await api.get<FeatureFlags>('/api/v1/settings/features')).data })
+  return useQuery({ queryKey: ['settings', 'features'], queryFn: async () => (await api.get<FeatureFlags>('settings/features')).data })
 }
 function useCredentialStatus() {
-  return useQuery({ queryKey: ['settings', 'credentials'], queryFn: async () => (await api.get<CredentialStatus>('/api/v1/settings/credentials')).data })
+  return useQuery({ queryKey: ['settings', 'credentials'], queryFn: async () => (await api.get<CredentialStatus>('settings/credentials')).data })
 }
 function StatusIcon({ ok }: { ok: boolean }) {
   return ok ? <CheckCircle className="h-5 w-5 text-green-400" /> : <XCircle className="h-5 w-5 text-red-400" />
