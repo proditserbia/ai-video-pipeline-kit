@@ -83,3 +83,21 @@ export function useCancelJob() {
     },
   })
 }
+
+export function useDownloadJob() {
+  return useMutation({
+    mutationFn: async (job: Job) => {
+      const response = await api.get(`jobs/${job.id}/download`, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(new Blob([response.data], { type: 'video/mp4' }))
+      const link = document.createElement('a')
+      link.href = url
+      const disposition = response.headers['content-disposition'] as string | undefined
+      const match = disposition?.match(/filename[^;=\n]*=(['"]?)([^'";\n]+)\1/)
+      link.download = match ? match[2] : `${job.title}.mp4`
+      link.click()
+      URL.revokeObjectURL(url)
+    },
+  })
+}

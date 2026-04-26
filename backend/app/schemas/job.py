@@ -110,8 +110,10 @@ class JobResponse(JobBase):
     @computed_field  # type: ignore[misc]
     @property
     def output_url(self) -> str | None:
-        """Alias for output_path so the frontend download button works."""
-        return self.output_path
+        """Return the authenticated download URL for the job output."""
+        if not self.output_path:
+            return None
+        return f"/api/v1/jobs/{self.id}/download"
 
 
 class JobListResponse(BaseModel):
