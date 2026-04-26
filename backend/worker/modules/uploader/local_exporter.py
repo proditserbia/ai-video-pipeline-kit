@@ -14,7 +14,7 @@ logger = structlog.get_logger(__name__)
 
 
 class LocalExporter(AbstractUploader):
-    """Copies the finished video to the outputs directory and returns a local URL."""
+    """Copies the finished video to the outputs directory and returns an API download URL."""
 
     def __init__(self, output_dir: str | None = None) -> None:
         self._output_dir = Path(output_dir or settings.STORAGE_PATH) / "outputs"
@@ -33,6 +33,9 @@ class LocalExporter(AbstractUploader):
         if src.resolve() != dest.resolve():
             shutil.copy2(src, dest)
 
-        url = f"file://{dest.resolve()}"
+        # Return an API download URL — never a raw filesystem path.
+        # dest.stem is the job UUID (outputs are stored as {job_id}.mp4).
+        job_id = dest.stem
+        url = f"/api/v1/jobs/{job_id}/download"
         logger.info("local_export_complete", url=url)
-        return UploadResult(url=url, platform="local", metadata={"dest": str(dest)})
+        return UploadResult(url=url, platform="local")
