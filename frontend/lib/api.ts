@@ -4,9 +4,9 @@ import { getToken, removeToken } from './auth'
 const apiUrl = process.env.NEXT_PUBLIC_API_URL
 
 if (!apiUrl) {
-  console.warn(
+  throw new Error(
     '[api] NEXT_PUBLIC_API_URL is not set. ' +
-    'Requests may fail. Set NEXT_PUBLIC_API_URL as a build arg.'
+    'Set it as a build arg (ARG NEXT_PUBLIC_API_URL) before running npm run build.'
   )
 }
 
