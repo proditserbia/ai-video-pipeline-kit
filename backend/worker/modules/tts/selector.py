@@ -12,12 +12,12 @@ logger = logging.getLogger(__name__)
 
 def _coqui_reachable() -> bool:
     """Return True if the Coqui TTS server responds to a health-check request."""
-    url = settings.COQUI_TTS_URL.rstrip("/")
+    url = settings.COQUI_TTS_URL.rstrip("/") + "/api/tts"
     try:
-        response = httpx.get(url, timeout=5.0)
-        response.raise_for_status()
+        # Any HTTP response (including 4xx) confirms the server is up.
+        httpx.get(url, params={"text": "ping"}, timeout=5.0)
         return True
-    except Exception as exc:
+    except (httpx.HTTPStatusError, httpx.RequestError, OSError) as exc:
         logger.warning("Coqui TTS health check failed (%s) – skipping provider.", exc)
         return False
 
