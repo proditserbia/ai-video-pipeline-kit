@@ -4,14 +4,14 @@ import { getToken, removeToken } from './auth'
 const apiUrl = process.env.NEXT_PUBLIC_API_URL
 
 if (!apiUrl) {
-  console.warn(
+  throw new Error(
     '[api] NEXT_PUBLIC_API_URL is not set. ' +
-    'Falling back to http://localhost:8000/api/v1 for development.'
+    'Set it as a build arg (ARG NEXT_PUBLIC_API_URL) before running npm run build.'
   )
 }
 
 const api = axios.create({
-  baseURL: apiUrl || 'http://localhost:8000/api/v1',
+  baseURL: apiUrl,
   headers: {
     'Content-Type': 'application/json',
   },
