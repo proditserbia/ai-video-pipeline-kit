@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import structlog
+
+from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
@@ -111,9 +114,10 @@ class FFmpegVideoBuilder:
         return [clip_path]
 
     def _prepare_clips(self, clips: list[Path], work_dir: Path) -> list[Path]:
-        """Scale/crop each clip to 1080x1920 and trim/loop to ~10 s."""
-        prepared: list[Path] = []
-        for i, clip in enumerate(clips):
+        """Scale/crop each clip to 1080x1920 and trim/loop to ~10 s (in parallel)."""
+
+        def _prepare_one(args: tuple[int, Path]) -> Path:
+            i, clip = args
             out = work_dir / f"clip_{i:03d}.mp4"
             # Scale with crop to maintain aspect ratio for 9:16
             vf = (
@@ -133,7 +137,11 @@ class FFmpegVideoBuilder:
                 "-an",
                 str(out),
             ])
-            prepared.append(out)
+            return out
+
+        max_workers = max(1, min(settings.PIPELINE_MAX_WORKERS, len(clips)))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            prepared = list(pool.map(_prepare_one, enumerate(clips)))
         return prepared
 
     def _concatenate_clips(self, clips: list[Path], work_dir: Path) -> Path:

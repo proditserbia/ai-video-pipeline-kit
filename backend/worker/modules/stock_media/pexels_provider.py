@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import structlog
+from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
 from worker.modules.base import MediaAsset
@@ -34,35 +35,46 @@ class PexelsProvider(AbstractStockProvider):
             logger.error("pexels_fetch_error", error=str(exc))
             return []
 
-        assets: list[MediaAsset] = []
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
+        # Build list of (video_metadata, file_url, dest) for parallel download.
+        tasks: list[tuple[dict, str, Path]] = []
         for video in data.get("videos", [])[:count]:
-            # Choose smallest file for speed
             video_files = sorted(video.get("video_files", []), key=lambda f: f.get("file_size", 999999))
             if not video_files:
                 continue
             file_url = video_files[0].get("link")
             if not file_url:
                 continue
-
             dest = out / f"pexels_{video['id']}.mp4"
+            tasks.append((video, file_url, dest))
+
+        if not tasks:
+            return []
+
+        def _download(task: tuple[dict, str, Path]) -> MediaAsset | None:
+            video, file_url, dest = task
             try:
                 with httpx.Client(timeout=60) as dl:
                     with dl.stream("GET", file_url) as r:
                         with open(dest, "wb") as f:
                             for chunk in r.iter_bytes(65536):
                                 f.write(chunk)
-                assets.append(MediaAsset(
+                return MediaAsset(
                     path=str(dest),
                     source="pexels",
                     width=video.get("width", 0),
                     height=video.get("height", 0),
                     duration=float(video.get("duration", 0)),
                     metadata={"id": video["id"]},
-                ))
+                )
             except Exception as exc:
                 logger.warning("pexels_download_error", url=file_url, error=str(exc))
+                return None
 
-        return assets
+        max_workers = max(1, min(settings.PIPELINE_MAX_WORKERS, len(tasks)))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            results = list(pool.map(_download, tasks))
+
+        return [r for r in results if r is not None]

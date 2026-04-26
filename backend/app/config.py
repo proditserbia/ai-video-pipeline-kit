@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     # Stock media
     PEXELS_API_KEY: str | None = None
     PIXABAY_API_KEY: str | None = None
+    # Maximum parallel workers for stock-media downloads and clip preparation.
+    PIPELINE_MAX_WORKERS: int = 4
 
     # Cloud storage (S3-compatible)
     S3_ENDPOINT_URL: str | None = None
