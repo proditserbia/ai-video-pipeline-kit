@@ -18,8 +18,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "Use a conversational tone. No scene directions, only spoken text."
 )
 
-_MAX_ATTEMPTS = 3
-_BASE_BACKOFF = 2.0  # seconds
+MAX_ATTEMPTS = 3
+BASE_BACKOFF = 2.0  # seconds
 
 
 class OpenAIRateLimitedError(Exception):
@@ -44,7 +44,7 @@ class OpenAIScriptProvider(AbstractScriptProvider):
 
         last_exc: Exception | None = None
         with httpx.Client(timeout=60) as client:
-            for attempt in range(1, _MAX_ATTEMPTS + 1):
+            for attempt in range(1, MAX_ATTEMPTS + 1):
                 response = client.post(
                     f"{settings.OPENAI_BASE_URL}/chat/completions",
                     json=payload,
@@ -60,16 +60,16 @@ class OpenAIScriptProvider(AbstractScriptProvider):
                         try:
                             wait = float(retry_after)
                         except ValueError:
-                            wait = _BASE_BACKOFF * (2 ** (attempt - 1))
+                            wait = BASE_BACKOFF * (2 ** (attempt - 1))
                     else:
-                        wait = _BASE_BACKOFF * (2 ** (attempt - 1))
+                        wait = BASE_BACKOFF * (2 ** (attempt - 1))
 
                     last_exc = httpx.HTTPStatusError(
-                        f"429 Too Many Requests (attempt {attempt}/{_MAX_ATTEMPTS})",
+                        f"429 Too Many Requests (attempt {attempt}/{MAX_ATTEMPTS})",
                         request=response.request,
                         response=response,
                     )
-                    if attempt < _MAX_ATTEMPTS:
+                    if attempt < MAX_ATTEMPTS:
                         logger.warning(
                             "openai_rate_limited_retry",
                             attempt=attempt,
@@ -88,5 +88,5 @@ class OpenAIScriptProvider(AbstractScriptProvider):
                 )
 
         raise OpenAIRateLimitedError(
-            f"OpenAI returned 429 after {_MAX_ATTEMPTS} attempts"
+            f"OpenAI returned 429 after {MAX_ATTEMPTS} attempts"
         ) from last_exc

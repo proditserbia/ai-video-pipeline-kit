@@ -6,9 +6,9 @@ import httpx
 import pytest
 
 from worker.modules.script_generator.openai_provider import (
+    MAX_ATTEMPTS,
     OpenAIRateLimitedError,
     OpenAIScriptProvider,
-    _MAX_ATTEMPTS,
 )
 
 
@@ -50,7 +50,7 @@ class TestOpenAIScriptProvider429:
             with pytest.raises(OpenAIRateLimitedError):
                 provider.generate(topic="AI")
 
-        assert mock_client.post.call_count == _MAX_ATTEMPTS
+        assert mock_client.post.call_count == MAX_ATTEMPTS
 
     @patch("worker.modules.script_generator.openai_provider.time.sleep")
     def test_retries_before_raising(self, mock_sleep):

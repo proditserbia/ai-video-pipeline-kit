@@ -219,7 +219,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                         topic=topic, config=input_data.get("script_settings", {})
                     )
                 except OpenAIRateLimitedError:
-                    _script_warning = "OpenAI rate limited, fallback script used"
+                    script_warning = "OpenAI rate limited, fallback script used"
                     log.warning("openai_script_rate_limited", topic=topic)
                     logger.warning(
                         "OpenAI script generation rate limited, using fallback",
@@ -231,7 +231,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     )
                     job.output_metadata = {
                         **(job.output_metadata or {}),
-                        "script_warning": _script_warning,
+                        "script_warning": script_warning,
                     }
                     db.commit()
             else:
