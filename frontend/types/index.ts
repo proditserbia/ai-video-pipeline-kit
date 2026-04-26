@@ -27,7 +27,7 @@ export interface Project {
 }
 
 export type JobStatus = 'pending' | 'processing' | 'rendering' | 'uploading' | 'completed' | 'failed' | 'cancelled'
-export type CaptionStyle = 'none' | 'basic' | 'bold' | 'karaoke'
+export type CaptionStyle = 'none' | 'basic' | 'bold_center' | 'boxed' | 'large_bottom' | 'karaoke_placeholder'
 export type TopicStatus = 'pending' | 'approved' | 'rejected' | 'used'
 
 export interface ValidationResult {

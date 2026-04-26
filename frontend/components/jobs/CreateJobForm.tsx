@@ -30,7 +30,7 @@ const schema = z.object({
   script: z.string().optional(),
   topic: z.string().optional(),
   voice_name: z.string().min(1, 'Voice is required'),
-  caption_style: z.enum(['none', 'basic', 'bold', 'karaoke']),
+  caption_style: z.enum(['none', 'basic', 'bold_center', 'boxed', 'large_bottom', 'karaoke_placeholder']),
   dry_run: z.boolean(),
 })
 
@@ -165,8 +165,10 @@ export default function CreateJobForm() {
           <Select id="caption_style" {...register('caption_style')}>
             <option value="none">None</option>
             <option value="basic">Basic</option>
-            <option value="bold">Bold</option>
-            <option value="karaoke">Karaoke</option>
+            <option value="bold_center">Bold Center</option>
+            <option value="boxed">Boxed</option>
+            <option value="large_bottom">Large Bottom</option>
+            <option value="karaoke_placeholder">Karaoke</option>
           </Select>
         </div>
       </div>

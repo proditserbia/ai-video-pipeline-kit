@@ -187,3 +187,57 @@ class TestComposeForceStyle:
             )
 
         assert isinstance(captured[0], list)
+
+
+# ---------------------------------------------------------------------------
+# Tests for JobCreate.caption_style field validator
+# ---------------------------------------------------------------------------
+
+
+class TestJobCreateCaptionStyleValidator:
+    """JobCreate must accept every style in VALID_CAPTION_STYLES and reject others."""
+
+    def test_valid_styles_are_accepted(self):
+        from app.schemas.job import JobCreate, VALID_CAPTION_STYLES
+
+        for style in VALID_CAPTION_STYLES:
+            job = JobCreate(title="t", caption_style=style)
+            assert job.caption_style == style
+
+    def test_none_style_is_accepted(self):
+        from app.schemas.job import JobCreate
+
+        job = JobCreate(title="t", caption_style="none")
+        assert job.caption_style == "none"
+
+    def test_invalid_style_raises_value_error(self):
+        import pytest
+        from pydantic import ValidationError
+        from app.schemas.job import JobCreate
+
+        with pytest.raises(ValidationError) as exc_info:
+            JobCreate(title="t", caption_style="bold")
+        assert "caption_style" in str(exc_info.value).lower() or "bold" in str(exc_info.value)
+
+    def test_karaoke_shorthand_rejected(self):
+        import pytest
+        from pydantic import ValidationError
+        from app.schemas.job import JobCreate
+
+        with pytest.raises(ValidationError):
+            JobCreate(title="t", caption_style="karaoke")
+
+    def test_bold_shorthand_rejected(self):
+        import pytest
+        from pydantic import ValidationError
+        from app.schemas.job import JobCreate
+
+        with pytest.raises(ValidationError):
+            JobCreate(title="t", caption_style="bold")
+
+    def test_default_caption_style_is_valid(self):
+        from app.schemas.job import JobCreate
+
+        # Default ("basic") must not raise.
+        job = JobCreate(title="t")
+        assert job.caption_style == "basic"

@@ -7,6 +7,15 @@ from pydantic import BaseModel, computed_field, field_validator
 
 from app.models.job import JobStatus, JobType
 
+# The canonical set of caption styles accepted by the pipeline.
+# Must be kept in sync with CAPTION_STYLE_MAP in
+# worker/modules/video_builder/ffmpeg_builder.py.
+# "none" is a special opt-out value that tells the pipeline to skip caption
+# rendering (passed through as-is and handled by the worker).
+VALID_CAPTION_STYLES: frozenset[str] = frozenset(
+    {"none", "basic", "bold_center", "boxed", "large_bottom", "karaoke_placeholder"}
+)
+
 
 class JobBase(BaseModel):
     title: str
@@ -25,6 +34,16 @@ class JobCreate(JobBase):
     topic: str | None = None
     voice_name: str = "en-US-AriaNeural"
     caption_style: str = "basic"
+
+    @field_validator("caption_style")
+    @classmethod
+    def _validate_caption_style(cls, v: str) -> str:
+        if v not in VALID_CAPTION_STYLES:
+            raise ValueError(
+                f"Invalid caption_style '{v}'. "
+                f"Must be one of: {', '.join(sorted(VALID_CAPTION_STYLES))}"
+            )
+        return v
 
 
 class JobUpdate(BaseModel):
