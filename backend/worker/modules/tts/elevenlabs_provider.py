@@ -15,8 +15,8 @@ _DEFAULT_MODEL = "eleven_turbo_v2_5"
 
 
 def _is_elevenlabs_voice_id(voice: str) -> bool:
-    """Return True when *voice* looks like an ElevenLabs voice ID (alphanumeric, ≤ 25 chars)."""
-    return bool(voice) and len(voice) <= 25 and voice.replace("-", "").replace("_", "").isalnum()
+    """Return True when *voice* looks like an ElevenLabs voice ID (alphanumeric only, ≤ 25 chars)."""
+    return bool(voice) and len(voice) <= 25 and voice.isalnum()
 
 
 class ElevenLabsTTSProvider(AbstractTTSProvider):
