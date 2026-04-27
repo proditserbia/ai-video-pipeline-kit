@@ -392,7 +392,12 @@ class TestPlanNarrationBlocks:
             assert b.duration is None
 
     def test_paragraph_breaks_respected(self):
-        script = "First paragraph content.\n\nSecond paragraph content."
+        # Use paragraphs with enough words to exceed the MIN_VISUAL_BLOCK_SECONDS
+        # threshold so that they are not merged by the ultra-short block guard.
+        script = (
+            "Groundhogs emerge from underground burrows in early spring each year.\n\n"
+            "The ceremony in Punxsutawney draws thousands of festive spectators annually."
+        )
         blocks = plan_narration_blocks(script)
         assert len(blocks) == 2
 

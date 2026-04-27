@@ -466,6 +466,87 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     )
                     _append_log(db, job, f"Narration blocks planned: {len(blocks)}")
 
+                    # ── Storyboard planning layer ──────────────────────────
+                    # When STORYBOARD_PLANNER_ENABLED=True this is the main
+                    # source of truth for visual generation.  It replaces the
+                    # AI_VISUAL_PLANNER path and the per-block prompt_builder
+                    # prompts with a richer, story-aware storyboard.
+                    _storyboard_scenes = None
+                    if settings.STORYBOARD_PLANNER_ENABLED:
+                        try:
+                            from worker.modules.storyboard import plan_storyboard
+                            _storyboard_scenes = plan_storyboard(
+                                _topic,
+                                _visual_tags or [],
+                                script_text,
+                                blocks,
+                            )
+                            # Apply storyboard image prompts back onto the blocks
+                            # so that the rest of the pipeline (TTS + image gen)
+                            # uses the storyboard-generated prompts.
+                            scenes_by_block = {
+                                s.narration_block_id: s
+                                for s in _storyboard_scenes
+                            }
+                            for block in blocks:
+                                scene = scenes_by_block.get(block.id)
+                                if scene and not scene.reuse_previous and scene.image_prompt:
+                                    block.image_prompt = scene.image_prompt
+                            _append_log(
+                                db, job,
+                                f"Storyboard planned: {len(_storyboard_scenes)} scenes"
+                                f" (provider={settings.STORYBOARD_PLANNER_PROVIDER})",
+                            )
+                            log.info(
+                                "storyboard_applied",
+                                n_scenes=len(_storyboard_scenes),
+                                provider=settings.STORYBOARD_PLANNER_PROVIDER,
+                            )
+                        except Exception as sb_exc:
+                            log.warning(
+                                "storyboard_planner_error",
+                                error=str(sb_exc),
+                            )
+                            _append_log(
+                                db, job,
+                                f"Storyboard planner error (non-fatal, using block prompts): {sb_exc}",
+                            )
+                            _storyboard_scenes = None
+                    elif settings.AI_VISUAL_PLANNER_ENABLED:
+                        # Legacy: override block image prompts with AI-generated
+                        # visual briefs when AI_VISUAL_PLANNER_ENABLED=True.
+                        try:
+                            from worker.modules.ai_images.visual_planner import (
+                                plan_visual_briefs,
+                            )
+                            briefs = plan_visual_briefs(
+                                _topic,
+                                _visual_tags or [],
+                                script_text,
+                                blocks,
+                            )
+                            if briefs:
+                                briefs_by_index = {b.block_index: b for b in briefs}
+                                for block in blocks:
+                                    brief = briefs_by_index.get(block.index)
+                                    if brief and brief.visual_prompt:
+                                        block.image_prompt = brief.visual_prompt
+                                        log.info(
+                                            "ai_visual_planner_prompt_applied",
+                                            block=block.index,
+                                            prompt_preview=brief.visual_prompt[:120],
+                                        )
+                                _append_log(
+                                    db, job,
+                                    f"AI visual planner applied {len(briefs)} visual briefs",
+                                )
+                        except Exception as vp_exc:
+                            log.warning(
+                                "ai_visual_planner_error",
+                                error=str(vp_exc),
+                            )
+                            _append_log(db, job, f"AI visual planner error (non-fatal): {vp_exc}")
+
                     # Instantiate the configured AI image provider once.
                     try:
                         ai_provider = get_ai_image_provider()
@@ -478,6 +559,10 @@ def run_video_pipeline(self, job_id: str) -> dict:
 
                     image_dir = media_dir / "ai_images"
                     image_dir.mkdir(exist_ok=True)
+
+                    # Default block duration (seconds) used when no TTS audio
+                    # is available to measure the actual duration.
+                    _DEFAULT_BLOCK_DURATION_SECONDS: float = 5.0
 
                     # Resolve per-block TTS provider (same priority chain as Step 4).
                     _block_voice = _resolve_voice(input_data)
@@ -492,6 +577,16 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     _cursor: float = 0.0
 
                     if ai_provider is not None:
+                        # Build storyboard-scene index for reuse_previous checks.
+                        _storyboard_by_block_id: dict = {}
+                        if _storyboard_scenes:
+                            _storyboard_by_block_id = {
+                                s.narration_block_id: s
+                                for s in _storyboard_scenes
+                            }
+
+                        _last_image_path: Path | None = None
+
                         for block in blocks:
                             # ── Per-block TTS ─────────────────────────────
                             block_audio = work_dir / f"voice_{block.index:03d}.mp3"
@@ -519,6 +614,54 @@ def run_video_pipeline(self, job_id: str) -> dict:
                                     )
                                     _append_log(db, job, _warn)
 
+                            dur = block_dur if block_dur is not None else _DEFAULT_BLOCK_DURATION_SECONDS
+
+                            # ── Check reuse_previous flag ──────────────────
+                            _sb_scene = _storyboard_by_block_id.get(block.id)
+                            _reuse = (
+                                _sb_scene is not None
+                                and _sb_scene.reuse_previous
+                                and _last_image_path is not None
+                            )
+
+                            if _reuse:
+                                # Extend the previous visual segment's duration
+                                # rather than generating a new image.
+                                reuse_path = _last_image_path
+                                block.start_time = _cursor
+                                block.end_time = _cursor + dur
+                                block.duration = dur
+                                block.image_path = reuse_path
+                                _cursor += dur
+                                if _segments:
+                                    # Extend the last segment's duration.
+                                    prev = _segments[-1]
+                                    _segments[-1] = VisualSegment(
+                                        path=prev.path,
+                                        start_time=prev.start_time,
+                                        end_time=prev.end_time + dur,
+                                        duration=prev.duration + dur,
+                                        type=prev.type,
+                                        scene_id=prev.scene_id,
+                                    )
+                                else:
+                                    seg = VisualSegment(
+                                        path=reuse_path,
+                                        start_time=block.start_time,
+                                        end_time=block.end_time,
+                                        duration=dur,
+                                        type="image",
+                                        scene_id=block.id,
+                                    )
+                                    _segments.append(seg)
+                                log.info(
+                                    "ai_image_block_reused",
+                                    index=block.index,
+                                    reused_path=str(reuse_path),
+                                    duration=dur,
+                                )
+                                continue
+
                             # ── Per-block AI image ─────────────────────────
                             img_path = image_dir / f"scene_{block.index:03d}.png"
                             try:
@@ -528,11 +671,11 @@ def run_video_pipeline(self, job_id: str) -> dict:
                                     aspect_ratio=settings.AI_IMAGE_ASPECT_RATIO,
                                     metadata={"block_id": block.id},
                                 )
-                                dur = block_dur if block_dur is not None else 5.0
                                 block.start_time = _cursor
                                 block.end_time = _cursor + dur
                                 block.duration = dur
                                 block.image_path = Path(generated.path)
+                                _last_image_path = block.image_path
                                 _cursor += dur
                                 seg = VisualSegment(
                                     path=Path(generated.path),
@@ -612,6 +755,12 @@ def run_video_pipeline(self, job_id: str) -> dict:
                         "scenes": _scene_logs,
                         "n_scenes": len(_scene_logs),
                         "paragraph_sync": True,
+                        "storyboard_enabled": settings.STORYBOARD_PLANNER_ENABLED,
+                        "storyboard_provider": (
+                            settings.STORYBOARD_PLANNER_PROVIDER
+                            if settings.STORYBOARD_PLANNER_ENABLED
+                            else None
+                        ),
                     }
                     db.commit()
                     _append_log(db, job, f"AI images: {len(_segments)} segments generated")

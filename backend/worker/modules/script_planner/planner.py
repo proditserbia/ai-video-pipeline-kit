@@ -129,7 +129,11 @@ def plan_script_scenes(
     chunks = _group_sentences(sentences, n_scenes)
 
     # Build scenes, assigning proportional timings when audio_duration is known.
-    scenes = _build_scenes(chunks, audio_duration, topic=topic, visual_tags=visual_tags)
+    scenes = _build_scenes(
+        chunks, audio_duration,
+        topic=topic, visual_tags=visual_tags,
+        full_script_text=script_text,
+    )
     logger.info(
         "script_scenes_planned",
         n_scenes=len(scenes),
@@ -171,6 +175,7 @@ def _make_image_prompt(
     total_blocks: int = 1,
     previous_prompts: list[str] | None = None,
     visual_tags: list[str] | None = None,
+    full_script_text: str | None = None,
 ) -> str:
     """Convert a scene text chunk into a focused visual image prompt.
 
@@ -186,6 +191,7 @@ def _make_image_prompt(
         total_blocks=total_blocks,
         previous_prompts=previous_prompts,
         visual_tags=visual_tags,
+        full_script_text=full_script_text,
     )
 
 
@@ -201,6 +207,7 @@ def _build_scenes(
     audio_duration: float | None,
     topic: str = "",
     visual_tags: list[str] | None = None,
+    full_script_text: str | None = None,
 ) -> list[ScriptScene]:
     """Construct :class:`ScriptScene` objects with optional proportional timing."""
     total_chars = sum(len(c) for c in chunks) or len(chunks)  # guard zero
@@ -232,6 +239,7 @@ def _build_scenes(
             total_blocks=total,
             previous_prompts=previous_prompts,
             visual_tags=visual_tags,
+            full_script_text=full_script_text,
         )
         previous_prompts.append(prompt)
 
@@ -330,6 +338,69 @@ def _merge_short_blocks(blocks: list[str]) -> list[str]:
     return result
 
 
+# Absolute minimum word count per block regardless of speaking rate.
+# Prevents over-merging when speech is slower than average (130 wpm).
+_MIN_BLOCK_WORDS_FLOOR: int = 5
+
+
+def _compute_min_block_words() -> int:
+    """Derive the minimum word count per block from ``MIN_VISUAL_BLOCK_SECONDS``.
+
+    Assumes an average speaking rate of ~130 words per minute.  A block with
+    fewer words than this threshold is too short to justify its own image slot.
+    """
+    # 130 wpm → ~2.17 words/sec.
+    words_per_second = 130.0 / 60.0
+    return max(_MIN_BLOCK_WORDS_FLOOR, int(settings.MIN_VISUAL_BLOCK_SECONDS * words_per_second))
+
+
+def _merge_ultra_short_text_blocks(blocks: list[str]) -> list[str]:
+    """Merge any block whose word count falls below the minimum threshold.
+
+    This catches outro-style blocks like *"Happy Groundhog Day, everyone!"*
+    that are too short to generate useful TTS audio or a meaningful AI image.
+    Short blocks are merged into the **preceding** block.  If the first block
+    is too short it is prepended to the next block instead.
+
+    The minimum word threshold is derived from
+    :func:`_compute_min_block_words` and ultimately from
+    ``settings.MIN_VISUAL_BLOCK_SECONDS``.
+
+    Args:
+        blocks: List of raw paragraph strings.
+
+    Returns:
+        New list with ultra-short blocks merged into their neighbours.
+    """
+    if len(blocks) <= 1:
+        return list(blocks)
+
+    min_words = _compute_min_block_words()
+    result: list[str] = []
+
+    for block in blocks:
+        words = block.strip().split()
+        if result and len(words) < min_words:
+            # Merge with preceding block.
+            result[-1] = result[-1] + " " + block
+            logger.debug(
+                "ultra_short_block_merged",
+                merged_text=block[:60],
+                min_words=min_words,
+                actual_words=len(words),
+            )
+        else:
+            result.append(block)
+
+    # Edge case: first block too short and no preceding block.
+    # Re-check: if result[0] is still short and there's a following one, merge.
+    if len(result) >= 2 and len(result[0].strip().split()) < min_words:
+        result[1] = result[0] + " " + result[1]
+        result.pop(0)
+
+    return result
+
+
 def plan_narration_blocks(
     script_text: str,
     topic: str = "",
@@ -346,6 +417,10 @@ def plan_narration_blocks(
     3. Merge short conversational opener blocks (e.g. *"Hey there, friends!"*)
        into the following block so no block is too short to generate meaningful
        TTS audio or a useful AI image.
+    4. Merge any remaining ultra-short blocks (word count below the threshold
+       derived from ``MIN_VISUAL_BLOCK_SECONDS``) into the preceding block to
+       avoid wasting an expensive image generation slot on a brief outro phrase
+       like *"Happy Groundhog Day, everyone!"*.
 
     Args:
         script_text:  Full narration text (may be empty).
@@ -373,6 +448,9 @@ def plan_narration_blocks(
     # Merge short conversational fillers into their following block.
     paragraphs = _merge_short_blocks(paragraphs)
 
+    # Merge any remaining blocks that are too short for a meaningful image slot.
+    paragraphs = _merge_ultra_short_text_blocks(paragraphs)
+
     if not paragraphs:
         paragraphs = [_DEFAULT_NARRATION_TEXT]
 
@@ -387,6 +465,7 @@ def plan_narration_blocks(
             total_blocks=total,
             previous_prompts=previous_prompts,
             visual_tags=visual_tags,
+            full_script_text=script_text,
         )
         previous_prompts.append(prompt)
         blocks.append(
