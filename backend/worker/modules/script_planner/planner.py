@@ -4,6 +4,7 @@ import re
 import textwrap
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import structlog
 
@@ -37,6 +38,36 @@ class ScriptScene:
     start_time: float | None = None
     end_time: float | None = None
     duration: float | None = None
+
+
+@dataclass
+class NarrationBlock:
+    """A semantic narration block that pairs exactly one TTS audio file with one AI image.
+
+    Audio and image paths, along with timing fields, are populated by the
+    pipeline during processing and are ``None`` until assigned.
+
+    Attributes:
+        id:           Unique identifier (UUID string).
+        index:        Zero-based position in the block list.
+        text:         The narration text covered by this block.
+        image_prompt: Short visual description for the AI image generator.
+        audio_path:   Path to the per-block TTS MP3 (set after TTS generation).
+        image_path:   Path to the generated image (set after image generation).
+        start_time:   Block start in seconds relative to the video start.
+        end_time:     Block end in seconds.
+        duration:     Exact block length derived from the per-block audio file.
+    """
+
+    id: str
+    index: int
+    text: str
+    image_prompt: str
+    audio_path: Path | None = field(default=None)
+    image_path: Path | None = field(default=None)
+    start_time: float | None = field(default=None)
+    end_time: float | None = field(default=None)
+    duration: float | None = field(default=None)
 
 
 def plan_script_scenes(
@@ -189,3 +220,131 @@ def _build_scenes(
             cursor = float(end_t)  # type: ignore[arg-type]
 
     return scenes
+
+
+# ── NarrationBlock helpers ────────────────────────────────────────────────────
+
+# First words (lowercased) that signal a short conversational opener.
+_CONVERSATIONAL_OPENERS: frozenset[str] = frozenset({
+    "hey", "hi", "hello", "well", "now", "so", "alright", "okay", "ok",
+    "great", "good", "right", "sure", "yes", "no", "wait", "listen",
+    "look", "see", "think", "remember", "note", "here", "there",
+    "let", "let's", "here's",
+})
+
+# Blocks shorter than this many characters are candidates for merging.
+_MIN_BLOCK_CHARS: int = 60
+
+# Maximum word count for a block to still be considered a conversational opener.
+_MAX_CONVERSATIONAL_WORDS: int = 8
+
+# Placeholder text used when no script content is available.
+_DEFAULT_NARRATION_TEXT: str = "abstract cinematic background"
+
+
+def _split_paragraphs(text: str) -> list[str]:
+    """Split *text* on one or more blank lines into paragraphs."""
+    if not text or not text.strip():
+        return []
+    parts = re.split(r"\n\s*\n", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _is_short_conversational(text: str) -> bool:
+    """Return ``True`` when *text* is a short conversational filler.
+
+    A block qualifies when it is below ``_MIN_BLOCK_CHARS`` characters *and*
+    its first word is a known conversational opener with at most
+    ``_MAX_CONVERSATIONAL_WORDS`` words total.
+    """
+    stripped = text.strip().rstrip(".!?,;")
+    if len(stripped) >= _MIN_BLOCK_CHARS:
+        return False
+    words = stripped.lower().split()
+    if not words:
+        return True
+    return words[0] in _CONVERSATIONAL_OPENERS and len(words) <= _MAX_CONVERSATIONAL_WORDS
+
+
+def _merge_short_blocks(blocks: list[str]) -> list[str]:
+    """Merge short conversational opener blocks into the following block.
+
+    When a block is detected as a short conversational filler it is held as
+    *pending* and prepended to the next block.  If the last block is also a
+    short filler it is appended to the preceding result (or kept solo when
+    there is no preceding result).
+    """
+    if len(blocks) <= 1:
+        return list(blocks)
+
+    result: list[str] = []
+    pending: str = ""
+    for block in blocks:
+        if pending:
+            # Pending opener: merge unconditionally and emit without re-check.
+            result.append(pending + " " + block)
+            pending = ""
+        elif _is_short_conversational(block):
+            pending = block
+        else:
+            result.append(block)
+
+    # Dangling short opener at the end.
+    if pending:
+        if result:
+            result[-1] = result[-1] + " " + pending
+        else:
+            result.append(pending)
+
+    return result
+
+
+def plan_narration_blocks(script_text: str) -> list[NarrationBlock]:
+    """Split *script_text* into semantic :class:`NarrationBlock` objects.
+
+    **Splitting strategy**:
+
+    1. Prefer blank-line-separated paragraphs.  These map naturally to
+       semantic breaks the author already chose.
+    2. Fall back to grouping sentences into pairs (~5–10 s @ 130 wpm) when
+       the script has no paragraph breaks.
+    3. Merge short conversational opener blocks (e.g. *"Hey there, friends!"*)
+       into the following block so no block is too short to generate meaningful
+       TTS audio or a useful AI image.
+
+    Args:
+        script_text: Full narration text (may be empty).
+
+    Returns:
+        Ordered list of :class:`NarrationBlock` objects (at least one).
+    """
+    paragraphs = _split_paragraphs(script_text)
+
+    # Fall back to sentence-based grouping when there are no paragraph breaks.
+    if len(paragraphs) <= 1:
+        sentences = _split_sentences(script_text)
+        if not sentences:
+            sentences = [_DEFAULT_NARRATION_TEXT]
+        # Target ~2 sentences per block (≈5–10 s at an average speaking rate).
+        n_blocks = max(1, len(sentences) // 2)
+        paragraphs = _group_sentences(sentences, n_blocks)
+
+    # Merge short conversational fillers into their following block.
+    paragraphs = _merge_short_blocks(paragraphs)
+
+    if not paragraphs:
+        paragraphs = [_DEFAULT_NARRATION_TEXT]
+
+    blocks: list[NarrationBlock] = []
+    for i, text in enumerate(paragraphs):
+        blocks.append(
+            NarrationBlock(
+                id=str(uuid.uuid4()),
+                index=i,
+                text=text,
+                image_prompt=_make_image_prompt(text),
+            )
+        )
+
+    logger.info("narration_blocks_planned", n_blocks=len(blocks))
+    return blocks
