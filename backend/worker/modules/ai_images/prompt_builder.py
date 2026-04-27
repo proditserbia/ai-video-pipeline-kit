@@ -54,6 +54,11 @@ _PHRASE_RE = re.compile(
 # Minimum character length for scene text to be considered visually meaningful.
 _MIN_VISUAL_LENGTH = 20
 
+# Maximum character length for single-quoted strings to be considered inline
+# quotes (not multi-sentence blocks).  Longer single-quoted spans are left
+# intact because they are likely chapter titles or proper names.
+_MAX_SINGLE_QUOTE_LENGTH = 60
+
 
 def build_image_prompt(scene_text: str, topic: str = "") -> str:
     """Return a visual-only image prompt for *scene_text*.
@@ -94,7 +99,7 @@ def _strip_conversational(text: str) -> str:
     """Remove conversational / direct-address phrases from *text*."""
     # Remove quoted strings (they reproduce spoken words verbatim).
     no_quotes = re.sub(r'"[^"]*"', "", text)
-    no_quotes = re.sub(r"'[^']{0,60}'", "", no_quotes)
+    no_quotes = re.sub(rf"'[^']{{0,{_MAX_SINGLE_QUOTE_LENGTH}}}'", "", no_quotes)
 
     # Remove matched conversational phrases.
     cleaned = _PHRASE_RE.sub("", no_quotes)
@@ -137,7 +142,7 @@ def _fallback_description(original_text: str, topic: str) -> str:
 
 def _wrap_cinematic(visual_core: str) -> str:
     """Wrap *visual_core* in a cinematic framing with style suffixes."""
-    core = visual_core[0].upper() + visual_core[1:] if visual_core else visual_core
+    core = visual_core[:1].upper() + visual_core[1:] if visual_core else visual_core
     return (
         f"{core}, dramatic cinematic lighting, photorealistic, "
         f"high detail, vertical 9:16"
