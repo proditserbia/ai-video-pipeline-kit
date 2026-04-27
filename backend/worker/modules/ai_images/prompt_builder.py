@@ -71,6 +71,9 @@ _MAX_SINGLE_QUOTE_LENGTH = 60
 # Maximum number of words taken from scene text when building a subject hint.
 _SUBJECT_MAX_WORDS = 10
 
+# Minimum character length for a subject phrase to be considered usable.
+_MIN_SUBJECT_LENGTH = 4
+
 # ---------------------------------------------------------------------------
 # Animal keyword set – triggers the animal-specific shot plan.
 # ---------------------------------------------------------------------------
@@ -285,7 +288,7 @@ def _extract_subject(scene_text: str, topic: str) -> str:
     3. *topic* (any length) as a fallback when the text is too short to use.
     4. ``"abstract cinematic scene"`` as a last resort.
     """
-    if topic and len(topic.strip().split()) <= 5 and len(topic.strip()) > 1:
+    if topic and len(topic.strip().split()) <= 5 and len(topic.strip()) >= _MIN_SUBJECT_LENGTH:
         return topic.strip()
 
     # Extract a subject from the scene text regardless of its raw length.
@@ -294,7 +297,7 @@ def _extract_subject(scene_text: str, topic: str) -> str:
     words = first_sentence.split()[:_SUBJECT_MAX_WORDS]
     subject = " ".join(words).strip(".,!?")
 
-    if len(subject) > 3:
+    if len(subject) >= _MIN_SUBJECT_LENGTH:
         return subject
 
     # Nothing useful extracted from the text; fall back to topic or default.
