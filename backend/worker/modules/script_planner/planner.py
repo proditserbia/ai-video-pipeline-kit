@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import structlog
 
 from app.config import settings
+from worker.modules.ai_images.prompt_builder import build_image_prompt
 
 logger = structlog.get_logger(__name__)
 
@@ -130,10 +131,14 @@ def _group_sentences(sentences: list[str], n_groups: int) -> list[str]:
 
 
 def _make_image_prompt(text: str) -> str:
-    """Convert a scene text chunk into a focused visual image prompt."""
-    # Shorten to keep prompts concise and avoid overwhelming image generators.
-    shortened = textwrap.shorten(text, width=120, placeholder="...")
-    return f"A cinematic scene of {shortened}, dramatic lighting, photorealistic, high detail, 9:16 vertical"
+    """Convert a scene text chunk into a focused visual image prompt.
+
+    Delegates to :func:`~worker.modules.ai_images.prompt_builder.build_image_prompt`
+    which strips conversational phrases, avoids quoting narration verbatim, and
+    appends the configured negative-prompt suffix so that image models never
+    render on-screen text, captions, or speech bubbles.
+    """
+    return build_image_prompt(text)
 
 
 def _make_search_query(text: str) -> str:

@@ -74,22 +74,34 @@ class TestGroupSentences:
 
 
 class TestMakeImagePrompt:
-    def test_starts_with_cinematic_prefix(self):
+    def test_contains_no_text(self):
         prompt = _make_image_prompt("Scientists discover a new planet.")
-        assert prompt.startswith("A cinematic scene of")
+        assert "No text" in prompt
 
-    def test_contains_original_text(self):
+    def test_contains_no_captions(self):
         prompt = _make_image_prompt("Ocean waves crash on shore.")
-        assert "Ocean waves" in prompt
+        assert "no captions" in prompt.lower()
 
-    def test_long_text_is_shortened(self):
+    def test_long_text_is_acceptable_length(self):
         long_text = "word " * 100
         prompt = _make_image_prompt(long_text)
-        assert len(prompt) < 300
+        # Prompt should be present and not absurdly long
+        assert len(prompt) > 0
+        assert len(prompt) < 800
 
     def test_includes_style_suffix(self):
         prompt = _make_image_prompt("A quiet forest.")
         assert "9:16" in prompt or "cinematic" in prompt
+
+    def test_conversational_opener_stripped(self):
+        prompt = _make_image_prompt("Hey there, friends! Let's talk about bees today.")
+        assert "Hey there" not in prompt
+        assert "friends" not in prompt
+
+    def test_prompt_not_just_raw_narration(self):
+        raw = "Hey there, friends!"
+        prompt = _make_image_prompt(raw)
+        assert raw not in prompt
 
 
 # ── _make_search_query ────────────────────────────────────────────────────────
@@ -129,7 +141,7 @@ class TestPlanScriptScenes:
     def test_scenes_have_image_prompts(self):
         scenes = plan_script_scenes("The forest glows at dawn.")
         for scene in scenes:
-            assert scene.image_prompt.startswith("A cinematic scene of")
+            assert "No text" in scene.image_prompt
 
     def test_scenes_have_search_queries(self):
         scenes = plan_script_scenes("Scientists found water on Mars.")
