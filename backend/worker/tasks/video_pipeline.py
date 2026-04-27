@@ -481,6 +481,34 @@ def run_video_pipeline(self, job_id: str) -> dict:
                                 script_text,
                                 blocks,
                             )
+                            # ── Scene quality scoring + auto-rewrite ──────
+                            # When STORYBOARD_QUALITY_ENABLED=True each scene
+                            # is scored and rewritten if below threshold,
+                            # before prompts are applied to blocks.
+                            if settings.STORYBOARD_QUALITY_ENABLED:
+                                try:
+                                    from worker.modules.storyboard import (
+                                        validate_and_improve_storyboard,
+                                    )
+                                    _storyboard_scenes = validate_and_improve_storyboard(
+                                        _storyboard_scenes,
+                                        _topic,
+                                        _visual_tags or [],
+                                        script_text,
+                                    )
+                                    log.info(
+                                        "storyboard_quality_pass_done",
+                                        n_scenes=len(_storyboard_scenes),
+                                    )
+                                except Exception as sq_exc:
+                                    log.warning(
+                                        "storyboard_quality_pass_error",
+                                        error=str(sq_exc),
+                                    )
+                                    _append_log(
+                                        db, job,
+                                        f"Storyboard quality pass error (non-fatal): {sq_exc}",
+                                    )
                             # Apply storyboard image prompts back onto the blocks
                             # so that the rest of the pipeline (TTS + image gen)
                             # uses the storyboard-generated prompts.
@@ -665,11 +693,19 @@ def run_video_pipeline(self, job_id: str) -> dict:
                             # ── Per-block AI image ─────────────────────────
                             img_path = image_dir / f"scene_{block.index:03d}.png"
                             try:
-                                generated = ai_provider.generate_image(
+                                from worker.modules.ai_images.image_selector import (
+                                    generate_and_select_best_image,
+                                )
+                                generated = generate_and_select_best_image(
+                                    ai_provider,
                                     block.image_prompt,
                                     img_path,
+                                    n_variations=settings.AI_IMAGE_VARIATIONS,
+                                    pick_strategy=settings.AI_IMAGE_PICK_STRATEGY,
                                     aspect_ratio=settings.AI_IMAGE_ASPECT_RATIO,
                                     metadata={"block_id": block.id},
+                                    keep_variations=settings.AI_IMAGE_KEEP_VARIATIONS,
+                                    scene=_storyboard_by_block_id.get(block.id),
                                 )
                                 block.start_time = _cursor
                                 block.end_time = _cursor + dur
