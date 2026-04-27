@@ -318,6 +318,20 @@ def run_video_pipeline(self, job_id: str) -> dict:
 
                 media_mode = (settings.MEDIA_MODE or "stock").lower()
 
+                log.info(
+                    "media_mode_resolved",
+                    media_mode=media_mode,
+                    ai_image_enabled=settings.AI_IMAGE_ENABLED,
+                    ai_image_provider=settings.AI_IMAGE_PROVIDER,
+                )
+                _append_log(
+                    db,
+                    job,
+                    f"media_mode_resolved: mode={media_mode!r} "
+                    f"ai_image_enabled={settings.AI_IMAGE_ENABLED} "
+                    f"ai_image_provider={settings.AI_IMAGE_PROVIDER!r}",
+                )
+
                 if media_mode == "ai" and settings.AI_IMAGE_ENABLED:
                     # ── New: script-scene-image-timeline path ──────────
                     _append_log(db, job, f"AI image pipeline enabled (provider={settings.AI_IMAGE_PROVIDER})")
