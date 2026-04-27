@@ -78,6 +78,8 @@ services:
       - COQUI_TTS_ENABLED=${COQUI_TTS_ENABLED:-true}
       - COQUI_TTS_URL=${COQUI_TTS_URL:-http://coqui-tts:5002}
       - EDGE_TTS_ENABLED=${EDGE_TTS_ENABLED:-false}
+      - PEXELS_API_KEY=${PEXELS_API_KEY:-}
+      - PIXABAY_API_KEY=${PIXABAY_API_KEY:-}
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-void}
     volumes:
       - storage_data:/storage

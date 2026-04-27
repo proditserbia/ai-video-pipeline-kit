@@ -129,6 +129,48 @@ class TestStockMediaSelectorProviderSelection:
         assert provider == "local"
         assert assets == local_assets
 
+    def test_pexels_exception_falls_back_to_pixabay(self, tmp_path):
+        """Unexpected exception from PexelsProvider → falls back to Pixabay."""
+        pixabay_assets = [_asset("pixabay")]
+        with (
+            patch("app.config.settings.PEXELS_API_KEY", "fake-pexels-key"),
+            patch("app.config.settings.PIXABAY_API_KEY", "fake-pixabay-key"),
+            patch(
+                "worker.modules.stock_media.pexels_provider.PexelsProvider.fetch",
+                side_effect=RuntimeError("unexpected pexels error"),
+            ),
+            patch(
+                "worker.modules.stock_media.pixabay_provider.PixabayProvider.fetch",
+                return_value=pixabay_assets,
+            ),
+        ):
+            selector = StockMediaSelector()
+            assets, provider = selector.fetch("nature", 1, str(tmp_path))
+
+        assert provider == "pixabay"
+        assert assets == pixabay_assets
+
+    def test_pexels_exception_falls_back_to_placeholder(self, tmp_path):
+        """Unexpected exception from PexelsProvider + no Pixabay key → placeholder."""
+        placeholder_assets = [_asset("local_placeholder")]
+        with (
+            patch("app.config.settings.PEXELS_API_KEY", "fake-pexels-key"),
+            patch("app.config.settings.PIXABAY_API_KEY", None),
+            patch(
+                "worker.modules.stock_media.pexels_provider.PexelsProvider.fetch",
+                side_effect=RuntimeError("unexpected pexels error"),
+            ),
+            patch(
+                "worker.modules.stock_media.local_provider.LocalMediaProvider.fetch",
+                return_value=placeholder_assets,
+            ),
+        ):
+            selector = StockMediaSelector()
+            assets, provider = selector.fetch("nature", 1, str(tmp_path))
+
+        assert provider == "placeholder"
+        assert assets == placeholder_assets
+
     def test_provider_name_is_local_when_mix_of_local_and_placeholder(self, tmp_path):
         mixed_assets = [_asset("local"), _asset("local_placeholder")]
         with (

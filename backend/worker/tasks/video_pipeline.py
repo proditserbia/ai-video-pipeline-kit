@@ -319,6 +319,8 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     or _resolve_topic(input_data)
                     or job.title
                 )
+                log.info("stock_media_query", query=search_query)
+                _append_log(db, job, f"Stock media search query: {search_query!r}")
                 selector = StockMediaSelector()
                 assets, stock_provider = selector.fetch(
                     query=search_query,
@@ -326,15 +328,40 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     output_dir=str(media_dir),
                 )
                 media_clips = [Path(a.path) for a in assets]
-                _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider}")
-                if stock_provider == "placeholder":
+                clip_paths = [str(p) for p in media_clips]
+                log.info(
+                    "stock_media_selected",
+                    provider=stock_provider,
+                    query=search_query,
+                    clips=len(clip_paths),
+                    paths=clip_paths,
+                )
+                _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider!r}")
+                if clip_paths:
+                    _append_log(db, job, f"Downloaded clips: {', '.join(clip_paths)}")
+
+                # Determine warning: Pexels was tried but returned nothing, or only placeholders
+                _stock_warn: str | None = None
+                if settings.PEXELS_API_KEY and stock_provider != "pexels":
+                    _stock_warn = (
+                        f"Pexels key is set but Pexels returned no clips; "
+                        f"fell back to {stock_provider!r}."
+                    )
+                    log.warning("stock_media_pexels_fallback", fallback_provider=stock_provider)
+                elif stock_provider == "placeholder":
                     _stock_warn = "Stock media: no real clips available. Placeholder visuals were used."
+                if _stock_warn:
                     _warnings.append(_stock_warn)
-                job.output_metadata = {
-                    **(job.output_metadata or {}),
+
+                _stock_meta: dict = {
                     "stock_provider": stock_provider,
+                    "stock_query": search_query,
+                    "stock_clips": clip_paths,
                     "clip_sources": [a.source for a in assets],
                 }
+                if _stock_warn:
+                    _stock_meta["stock_warning"] = _stock_warn
+                job.output_metadata = {**(job.output_metadata or {}), **_stock_meta}
                 db.commit()
             else:
                 _append_log(db, job, "Stock media skipped (dry run)")
