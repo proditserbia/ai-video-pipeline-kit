@@ -693,11 +693,19 @@ def run_video_pipeline(self, job_id: str) -> dict:
                             # ── Per-block AI image ─────────────────────────
                             img_path = image_dir / f"scene_{block.index:03d}.png"
                             try:
-                                generated = ai_provider.generate_image(
+                                from worker.modules.ai_images.image_selector import (
+                                    generate_and_select_best_image,
+                                )
+                                generated = generate_and_select_best_image(
+                                    ai_provider,
                                     block.image_prompt,
                                     img_path,
+                                    n_variations=settings.AI_IMAGE_VARIATIONS,
+                                    pick_strategy=settings.AI_IMAGE_PICK_STRATEGY,
                                     aspect_ratio=settings.AI_IMAGE_ASPECT_RATIO,
                                     metadata={"block_id": block.id},
+                                    keep_variations=settings.AI_IMAGE_KEEP_VARIATIONS,
+                                    scene=_storyboard_by_block_id.get(block.id),
                                 )
                                 block.start_time = _cursor
                                 block.end_time = _cursor + dur

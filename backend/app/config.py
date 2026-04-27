@@ -149,6 +149,24 @@ class Settings(BaseSettings):
     # Maximum rewrite attempts per scene before accepting the best version seen.
     STORYBOARD_QUALITY_MAX_RETRIES: int = 2
 
+    # ---------------------------------------------------------------------------
+    # Multi-image generation and selection
+    # ---------------------------------------------------------------------------
+    # When AI_IMAGE_VARIATIONS > 1, the pipeline generates that many candidate
+    # images per scene and automatically picks the best one.
+    # Keeping N ≤ 3 avoids excessive API cost and latency.
+    # Default: 1 (no multi-generation, preserves original behaviour).
+    AI_IMAGE_VARIATIONS: int = 1
+
+    # Strategy for picking the best image when AI_IMAGE_VARIATIONS > 1.
+    # "score"  — use score_image() heuristic (file size, dimensions, …).
+    # "random" — pick a random candidate.
+    AI_IMAGE_PICK_STRATEGY: str = "score"
+
+    # When True, discarded image variants are kept on disk for debugging.
+    # When False (default), they are removed after the best one is selected.
+    AI_IMAGE_KEEP_VARIATIONS: bool = False
+
     # Cloud storage (S3-compatible)
     S3_ENDPOINT_URL: str | None = None
     S3_ACCESS_KEY: str | None = None

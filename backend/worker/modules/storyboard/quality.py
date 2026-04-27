@@ -1,6 +1,7 @@
 """Scene quality scoring and auto-rewrite for storyboard scenes.
 
 Provides:
+- :func:`compute_scene_similarity`       — 0-1 similarity between two scenes.
 - :func:`score_scene`                    — 0-100 quality score for a scene.
 - :func:`is_generic_scene`               — True when a scene is too generic.
 - :func:`rewrite_scene`                  — LLM-based rewrite of a low-quality scene.
@@ -75,8 +76,11 @@ _HUMAN_WORDS: frozenset[str] = frozenset(
     }
 )
 
-# Jaccard threshold for "similar descriptions".
+# Jaccard threshold used for the binary "similar to previous" check.
 _SIMILARITY_THRESHOLD: float = 0.5
+
+# Jaccard similarity above which global diversity penalty kicks in.
+_DIVERSITY_SIMILARITY_THRESHOLD: float = 0.7
 
 # Stop-words excluded from similarity comparison.
 _STOP_WORDS: frozenset[str] = frozenset(
@@ -98,13 +102,57 @@ _MIN_REWRITE_RESPONSE_WORDS: int = 5
 # ---------------------------------------------------------------------------
 
 
+def compute_scene_similarity(
+    scene_a: StoryboardScene,
+    scene_b: StoryboardScene,
+) -> float:
+    """Return a similarity score in [0, 1] between two storyboard scenes.
+
+    Combines four signals with fixed weights:
+    - Visual description word overlap (Jaccard, 50 %)
+    - Shot type match                            (20 %)
+    - Subject match                              (20 %)
+    - Context terms overlap (Jaccard, 10 %)
+
+    Args:
+        scene_a: First scene.
+        scene_b: Second scene.
+
+    Returns:
+        Float in [0, 1].  1.0 means identical, 0.0 means no overlap.
+    """
+    # Description overlap — highest weight.
+    desc_sim = _jaccard_words(scene_a.visual_description, scene_b.visual_description)
+
+    # Shot type match.
+    shot_sim = 1.0 if scene_a.shot_type == scene_b.shot_type else 0.0
+
+    # Subject match (case-insensitive).
+    subj_sim = 1.0 if (
+        scene_a.subject and scene_b.subject
+        and scene_a.subject.strip().lower() == scene_b.subject.strip().lower()
+    ) else 0.0
+
+    # Context terms overlap.
+    terms_a = {t.lower() for t in (scene_a.context_terms or [])}
+    terms_b = {t.lower() for t in (scene_b.context_terms or [])}
+    if terms_a and terms_b:
+        ctx_sim = len(terms_a & terms_b) / len(terms_a | terms_b)
+    else:
+        ctx_sim = 0.0
+
+    return min(1.0, 0.5 * desc_sim + 0.2 * shot_sim + 0.2 * subj_sim + 0.1 * ctx_sim)
+
+
 def score_scene(
     scene: StoryboardScene,
     previous_scene: StoryboardScene | None = None,
+    accepted_scenes: list[StoryboardScene] | None = None,
 ) -> int:
     """Score a storyboard scene on a 0–100 scale.
 
-    Higher scores indicate more visually specific, context-rich scenes.
+    Higher scores indicate more visually specific, context-rich, and diverse
+    scenes.
 
     Scoring bonuses:
         +30  real-world context (crowd, environment, location, activity)
@@ -116,12 +164,17 @@ def score_scene(
     Penalties:
         -40  generic phrases detected
         -20  subject isolated without context
-        -15  very similar to previous scene
+        -15  similar to immediately preceding scene
+        up to -40  global diversity penalty when similarity > 0.7 vs any
+                   previously accepted scene (``similarity × 40``)
 
     Args:
         scene:          Scene to score.
         previous_scene: The scene immediately before this one (for variety
                         checks).  Pass ``None`` for the first scene.
+        accepted_scenes: All previously accepted scenes in the storyboard.
+                         Used for global diversity scoring.  Pass ``None``
+                         to skip the global diversity check.
 
     Returns:
         Integer score clamped to [0, 100].
@@ -173,6 +226,15 @@ def score_scene(
     if is_similar_to_prev:
         score -= 15
 
+    # Global diversity penalty: compare against ALL previously accepted scenes.
+    if accepted_scenes:
+        max_sim = max(
+            (compute_scene_similarity(scene, s) for s in accepted_scenes),
+            default=0.0,
+        )
+        if max_sim > _DIVERSITY_SIMILARITY_THRESHOLD:
+            score -= int(max_sim * 40)
+
     return max(0, min(100, score))
 
 
@@ -213,6 +275,7 @@ def rewrite_scene(
     topic: str,
     visual_tags: list[str],
     full_script: str,
+    diversity_hint: str | None = None,
 ) -> StoryboardScene:
     """Attempt to improve a low-quality scene using an LLM call.
 
@@ -220,10 +283,13 @@ def rewrite_scene(
     *scene* is returned unchanged so that the pipeline never stalls.
 
     Args:
-        scene:       The scene to rewrite.
-        topic:       Video topic.
-        visual_tags: User-supplied visual tags.
-        full_script: Full narration script (for context).
+        scene:          The scene to rewrite.
+        topic:          Video topic.
+        visual_tags:    User-supplied visual tags.
+        full_script:    Full narration script (for context).
+        diversity_hint: Optional instruction to make the scene visually
+                        different from previously accepted scenes (e.g. when
+                        global diversity similarity > threshold).
 
     Returns:
         A new :class:`StoryboardScene` with an improved visual description,
@@ -234,7 +300,7 @@ def rewrite_scene(
         return scene
 
     try:
-        raw = _call_rewrite_llm(scene, topic, visual_tags, full_script)
+        raw = _call_rewrite_llm(scene, topic, visual_tags, full_script, diversity_hint)
     except Exception as exc:
         logger.warning(
             "scene_rewrite_llm_failed",
@@ -290,13 +356,15 @@ def validate_and_improve_storyboard(
     visual_tags: list[str],
     full_script: str,
 ) -> list[StoryboardScene]:
-    """Score every scene and rewrite low-quality ones (up to MAX_RETRIES).
+    """Score every scene and rewrite low-quality or repetitive ones.
 
-    Scenes with ``score < STORYBOARD_QUALITY_THRESHOLD`` or
-    ``is_generic_scene == True`` are rewritten.  Each scene receives at most
-    ``STORYBOARD_QUALITY_MAX_RETRIES`` rewrite attempts.  If a scene still
-    fails after all retries the best version seen is kept and a warning is
-    logged.
+    Each scene is scored for both intrinsic quality and global diversity vs
+    all previously accepted scenes.  Scenes with
+    ``score < STORYBOARD_QUALITY_THRESHOLD`` or ``is_generic_scene == True``
+    or ``global similarity > 0.7`` are rewritten.  Each scene receives at
+    most ``STORYBOARD_QUALITY_MAX_RETRIES`` rewrite attempts.  If a scene
+    still fails after all retries the best version seen is kept and a warning
+    is logged.
 
     Scene count, timing, and ``reuse_previous`` flags are **always** preserved.
 
@@ -316,17 +384,34 @@ def validate_and_improve_storyboard(
 
     for scene in scenes:
         previous = improved[-1] if improved else None
-        initial_score = score_scene(scene, previous)
+        initial_score = score_scene(scene, previous, accepted_scenes=improved)
         generic = is_generic_scene(scene)
+
+        # Compute max similarity vs ALL previously accepted scenes.
+        max_sim_global: float = 0.0
+        if improved:
+            max_sim_global = max(
+                compute_scene_similarity(scene, s) for s in improved
+            )
+        diversity_issue = max_sim_global > _DIVERSITY_SIMILARITY_THRESHOLD
+
+        diversity_hint: str | None = None
+        if diversity_issue:
+            diversity_hint = (
+                "Make this scene visually different from all previous scenes. "
+                "Change the camera angle, environment, or subject context."
+            )
 
         logger.info(
             "scene_quality_score",
             block_index=scene.index,
             score=initial_score,
             generic_scene_detected=generic,
+            max_global_similarity=round(max_sim_global, 3),
+            diversity_issue=diversity_issue,
         )
 
-        if initial_score >= threshold and not generic:
+        if initial_score >= threshold and not generic and not diversity_issue:
             improved.append(scene)
             continue
 
@@ -337,8 +422,10 @@ def validate_and_improve_storyboard(
         attempts_made = 0
 
         for attempt in range(1, max_retries + 1):
-            candidate = rewrite_scene(best, topic, visual_tags, full_script)
-            candidate_score = score_scene(candidate, previous)
+            candidate = rewrite_scene(
+                best, topic, visual_tags, full_script, diversity_hint
+            )
+            candidate_score = score_scene(candidate, previous, accepted_scenes=improved)
 
             logger.info(
                 "scene_rewrite_attempt",
@@ -347,6 +434,7 @@ def validate_and_improve_storyboard(
                 score_before=best_score,
                 score_after=candidate_score,
                 scene_rewritten=True,
+                diversity_hint_used=diversity_hint is not None,
             )
 
             if candidate_score > best_score:
@@ -355,7 +443,18 @@ def validate_and_improve_storyboard(
                 rewritten = True
 
             attempts_made = attempt
-            if best_score >= threshold and not is_generic_scene(best):
+
+            # Recompute diversity after each rewrite.
+            new_max_sim: float = 0.0
+            if improved:
+                new_max_sim = max(
+                    compute_scene_similarity(best, s) for s in improved
+                )
+            if (
+                best_score >= threshold
+                and not is_generic_scene(best)
+                and new_max_sim <= _DIVERSITY_SIMILARITY_THRESHOLD
+            ):
                 break
 
         if best_score < threshold or is_generic_scene(best):
@@ -385,10 +484,32 @@ def validate_and_improve_storyboard(
 # ---------------------------------------------------------------------------
 
 
+def _jaccard_words(a: str, b: str) -> float:
+    """Return the Jaccard similarity coefficient for the content words in *a* and *b*.
+
+    Stop-words and very short tokens (≤ 2 chars) are excluded.
+
+    Args:
+        a: First text string.
+        b: Second text string.
+
+    Returns:
+        Float in [0, 1].  Returns 1.0 when both inputs are empty.
+    """
+    words_a = {w for w in a.lower().split() if w not in _STOP_WORDS and len(w) > 2}
+    words_b = {w for w in b.lower().split() if w not in _STOP_WORDS and len(w) > 2}
+    if not words_a and not words_b:
+        return 1.0
+    if not words_a or not words_b:
+        return 0.0
+    union = words_a | words_b
+    return len(words_a & words_b) / len(union)
+
+
 def _descriptions_similar(a: str, b: str) -> bool:
     """Return True when *a* and *b* share a high proportion of content words.
 
-    Uses Jaccard similarity on word sets with stop-words filtered out.
+    Uses :func:`_jaccard_words` with :data:`_SIMILARITY_THRESHOLD`.
 
     Args:
         a: First description.
@@ -397,14 +518,7 @@ def _descriptions_similar(a: str, b: str) -> bool:
     Returns:
         True when the Jaccard coefficient is ≥ :data:`_SIMILARITY_THRESHOLD`.
     """
-    words_a = {w for w in a.lower().split() if w not in _STOP_WORDS and len(w) > 2}
-    words_b = {w for w in b.lower().split() if w not in _STOP_WORDS and len(w) > 2}
-    if not words_a and not words_b:
-        return True
-    if not words_a or not words_b:
-        return False
-    union = words_a | words_b
-    return len(words_a & words_b) / len(union) >= _SIMILARITY_THRESHOLD
+    return _jaccard_words(a, b) >= _SIMILARITY_THRESHOLD
 
 
 def _call_rewrite_llm(
@@ -412,14 +526,17 @@ def _call_rewrite_llm(
     topic: str,
     visual_tags: list[str],
     full_script: str,
+    diversity_hint: str | None = None,
 ) -> dict[str, Any]:
     """Call OpenAI to produce an improved scene description.
 
     Args:
-        scene:       The scene to rewrite.
-        topic:       Video topic.
-        visual_tags: User-supplied visual tags.
-        full_script: Full narration script.
+        scene:          The scene to rewrite.
+        topic:          Video topic.
+        visual_tags:    User-supplied visual tags.
+        full_script:    Full narration script.
+        diversity_hint: Optional extra instruction to make the rewritten scene
+                        visually different from previously accepted ones.
 
     Returns:
         Parsed JSON dict with keys ``visual_description``, ``shot_type``,
@@ -440,6 +557,12 @@ def _call_rewrite_llm(
         "Return ONLY valid JSON — no markdown, no commentary."
     )
 
+    diversity_instruction = (
+        f"\n7. IMPORTANT — DIVERSITY: {diversity_hint}"
+        if diversity_hint
+        else ""
+    )
+
     user_msg = (
         f"Topic: {topic}\n"
         f"Visual tags: {tags_str}\n"
@@ -453,7 +576,8 @@ def _call_rewrite_llm(
         f"3. Remove generic phrases like 'in nature' or 'technology concept'.\n"
         f"4. Preserve the meaning of the narration block.\n"
         f"5. Do NOT include signs, text, logos, UI, or captions in the scene.\n"
-        f"6. Keep visual_description under 200 characters.\n\n"
+        f"6. Keep visual_description under 200 characters."
+        f"{diversity_instruction}\n\n"
         f"Return a JSON object:\n"
         f"{{\n"
         f'  "shot_type": "wide",\n'
