@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -63,6 +64,31 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return result
 
 
+def _probe_duration(path: Path) -> float | None:
+    """Return the duration (seconds) of a media file using ffprobe.
+
+    Returns ``None`` if the file does not exist or ffprobe fails.
+    """
+    if not path.exists():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return float(result.stdout.strip())
+    except (ValueError, OSError):
+        pass
+    return None
+
+
 class FFmpegVideoBuilder:
     """Builds a 1080x1920 vertical MP4 from clips + audio + optional SRT."""
 
@@ -83,9 +109,22 @@ class FFmpegVideoBuilder:
         if not clips:
             clips = self._generate_placeholder_clip(output_path.parent)
 
-        prepared = self._prepare_clips(clips, output_path.parent)
+        # Determine target video duration from audio so clips cover the full narration.
+        _PADDING = 0.3  # seconds of extra video beyond audio end
+        target_duration: float = 0.0
+        if audio_path:
+            audio_dur = _probe_duration(audio_path)
+            if audio_dur and audio_dur > 0:
+                target_duration = audio_dur + _PADDING
+                logger.info(
+                    "audio_duration_probed",
+                    audio_duration=audio_dur,
+                    target_video_duration=target_duration,
+                )
+
+        prepared = self._prepare_clips(clips, output_path.parent, target_duration=target_duration)
         concat_video = self._concatenate_clips(prepared, output_path.parent)
-        final = self._compose(
+        self._compose(
             video=concat_video,
             audio_path=audio_path,
             srt_path=srt_path,
@@ -113,8 +152,22 @@ class FFmpegVideoBuilder:
         ])
         return [clip_path]
 
-    def _prepare_clips(self, clips: list[Path], work_dir: Path) -> list[Path]:
-        """Scale/crop each clip to 1080x1920 and trim/loop to ~10 s (in parallel)."""
+    def _prepare_clips(self, clips: list[Path], work_dir: Path, target_duration: float = 0.0) -> list[Path]:
+        """Scale/crop each clip to 1080x1920 and trim/loop to ~10 s (in parallel).
+
+        If *target_duration* is given and the base clip list would produce less
+        total video than needed, the input list is extended by cycling through
+        the available clips until the total prepared duration is sufficient.
+        """
+        _CLIP_LEN = 10  # seconds per prepared segment
+
+        # Build the full list of source clips to prepare, cycling if necessary.
+        n_base = len(clips)
+        if target_duration > 0 and n_base > 0:
+            n_needed = max(n_base, math.ceil(target_duration / _CLIP_LEN))
+        else:
+            n_needed = n_base
+        source_list = [clips[i % n_base] for i in range(n_needed)]
 
         def _prepare_one(args: tuple[int, Path]) -> Path:
             i, clip = args
@@ -128,7 +181,7 @@ class FFmpegVideoBuilder:
                 "ffmpeg", "-y",
                 "-stream_loop", "-1",
                 "-i", str(clip),
-                "-t", "10",
+                "-t", str(_CLIP_LEN),
                 "-vf", vf,
                 "-c:v", "libx264",
                 "-crf", "23",
@@ -139,9 +192,9 @@ class FFmpegVideoBuilder:
             ])
             return out
 
-        max_workers = max(1, min(settings.PIPELINE_MAX_WORKERS, len(clips)))
+        max_workers = max(1, min(settings.PIPELINE_MAX_WORKERS, len(source_list)))
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            prepared = list(pool.map(_prepare_one, enumerate(clips)))
+            prepared = list(pool.map(_prepare_one, enumerate(source_list)))
         return prepared
 
     def _concatenate_clips(self, clips: list[Path], work_dir: Path) -> Path:
