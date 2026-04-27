@@ -419,8 +419,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     if _segments:
                         visual_segments = _segments
                     else:
-                        _warnings.append("AI image generation produced no images; falling back to placeholder.")
-                        log.warning("ai_image_no_segments_produced")
+                        raise RuntimeError("AI image pipeline produced 0 visual segments")
 
                     job.output_metadata = {
                         **(job.output_metadata or {}),
