@@ -365,6 +365,8 @@ class FFmpegVideoBuilder:
         for i, seg in enumerate(segments):
             out = work_dir / f"seg_{i:03d}.mp4"
             # Ensure a positive duration; guard against degenerate inputs.
+            # We clamp rather than raise so that one bad segment does not abort
+            # the entire render; the warning below makes the condition visible.
             if seg.duration is not None and seg.duration <= 0:
                 logger.warning(
                     "segment_invalid_duration",

@@ -388,7 +388,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                                 log.info(
                                     "ai_image_scene_generated",
                                     index=scene.index,
-                                    text=scene.text,
+                                    text=scene.text[:120],
                                     prompt=scene.image_prompt,
                                     provider=generated.provider,
                                     image_path=str(generated.path),
