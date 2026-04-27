@@ -141,7 +141,7 @@ def compute_scene_similarity(
     else:
         ctx_sim = 0.0
 
-    return min(1.0, 0.5 * desc_sim + 0.2 * shot_sim + 0.2 * subj_sim + 0.1 * ctx_sim)
+    return 0.5 * desc_sim + 0.2 * shot_sim + 0.2 * subj_sim + 0.1 * ctx_sim
 
 
 def score_scene(
@@ -499,7 +499,7 @@ def _jaccard_words(a: str, b: str) -> float:
     words_a = {w for w in a.lower().split() if w not in _STOP_WORDS and len(w) > 2}
     words_b = {w for w in b.lower().split() if w not in _STOP_WORDS and len(w) > 2}
     if not words_a and not words_b:
-        return 1.0
+        return 0.0
     if not words_a or not words_b:
         return 0.0
     union = words_a | words_b

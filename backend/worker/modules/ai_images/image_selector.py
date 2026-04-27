@@ -24,7 +24,11 @@ from worker.modules.ai_images.base import AIImageProvider, GeneratedImage
 
 logger = structlog.get_logger(__name__)
 
-# Minimum file size (bytes) for an image to be considered non-blank / non-corrupt.
+# Suffix appended to non-first variation prompts to encourage natural diversity.
+_VARIATION_PROMPT_SUFFIX: str = ", slightly different composition"
+
+# Tolerance for the 9:16 aspect-ratio check in score_image.
+_ASPECT_RATIO_TOLERANCE: float = 0.1
 _MIN_ACCEPTABLE_FILE_SIZE: int = 5_000   # 5 KB
 
 # A "reasonable" minimum for a real AI-generated image.
@@ -81,7 +85,7 @@ def score_image(
         if height > 0:
             ratio = width / height
             expected = 9 / 16
-            if abs(ratio - expected) <= 0.1:
+            if abs(ratio - expected) <= _ASPECT_RATIO_TOLERANCE:
                 score += 20
     except Exception:
         # PIL not available or file is not a recognised image format.
@@ -155,7 +159,7 @@ def generate_and_select_best_image(
     for i in range(n_variations):
         var_path = output_path.parent / f"{output_path.stem}_var{i}{output_path.suffix}"
         variation_prompt = (
-            prompt if i == 0 else f"{prompt}, slightly different composition"
+            prompt if i == 0 else f"{prompt}{_VARIATION_PROMPT_SUFFIX}"
         )
         try:
             gen = provider.generate_image(

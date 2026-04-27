@@ -78,7 +78,7 @@ def _make_generated_image(path: Path, provider: str = "mock") -> GeneratedImage:
 
 
 def _write_solid_png(path: Path, width: int = 576, height: int = 1024) -> None:
-    """Write a minimal valid solid-colour PNG using Pillow."""
+    """Write a minimal valid solid-colour PNG using raw byte construction."""
     import struct
     import zlib
 
