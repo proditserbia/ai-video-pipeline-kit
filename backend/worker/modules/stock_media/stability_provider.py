@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import httpx
@@ -103,6 +104,5 @@ class StabilityAIProvider(AbstractStockProvider):
             response.raise_for_status()
 
         data = response.json()
-        import base64
         b64 = data["artifacts"][0]["base64"]
         return base64.b64decode(b64)
