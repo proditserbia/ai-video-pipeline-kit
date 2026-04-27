@@ -6,6 +6,7 @@ import { useProjects } from '@/hooks/useProjects'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
 import ResultQualityBadge from '@/components/jobs/ResultQualityBadge'
 import JobThumbnail from '@/components/jobs/JobThumbnail'
+import JobVideoPreview from '@/components/jobs/JobVideoPreview'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
@@ -107,11 +108,17 @@ export default function JobsPage() {
                     <TableRow key={job.id}>
                       <TableCell className="w-16">
                         {job.thumbnail_url ? (
-                          <JobThumbnail
+                          <JobVideoPreview
                             jobId={job.id}
-                            className="h-14 w-8 rounded object-cover"
-                            alt={job.title}
-                          />
+                            enabled={job.status === 'completed' && !!job.output_url}
+                            className="h-14 w-8 rounded"
+                          >
+                            <JobThumbnail
+                              jobId={job.id}
+                              className="h-14 w-8 rounded object-cover"
+                              alt={job.title}
+                            />
+                          </JobVideoPreview>
                         ) : (
                           <div className="h-14 w-8 rounded bg-gray-700" />
                         )}

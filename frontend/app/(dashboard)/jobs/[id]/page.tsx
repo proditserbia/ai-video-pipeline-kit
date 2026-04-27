@@ -8,6 +8,7 @@ import JobStatusBadge from '@/components/jobs/JobStatusBadge'
 import ResultQualityBadge from '@/components/jobs/ResultQualityBadge'
 import JobLogViewer from '@/components/jobs/JobLogViewer'
 import JobThumbnail from '@/components/jobs/JobThumbnail'
+import JobVideoPreview from '@/components/jobs/JobVideoPreview'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -101,10 +102,16 @@ export default function JobDetailPage() {
         <Card>
           <CardHeader><CardTitle>Preview</CardTitle></CardHeader>
           <CardContent>
-            <JobThumbnail
+            <JobVideoPreview
               jobId={job.id}
-              className="max-h-64 w-auto rounded-md object-contain"
-            />
+              enabled={job.status === 'completed' && !!job.output_url}
+              className="inline-block rounded-md"
+            >
+              <JobThumbnail
+                jobId={job.id}
+                className="max-h-64 w-auto rounded-md object-contain"
+              />
+            </JobVideoPreview>
           </CardContent>
         </Card>
       )}
