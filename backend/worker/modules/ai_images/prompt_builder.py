@@ -5,9 +5,10 @@ NOT cause image models to render on-screen text, captions, speech bubbles,
 or other typographic elements.
 
 When ``settings.VISUAL_SHOT_PLAN_ENABLED`` is ``True`` (the default), each
-block receives a distinct shot type drawn from a rotating plan so that a
-multi-block video about the same subject never produces five identical
-close-up portraits.
+block receives a distinct shot type drawn from a rotating, category-aware
+plan so that a multi-block video about the same subject never produces five
+identical close-up portraits.  The category is detected automatically from
+the topic and/or scene text via :func:`detect_visual_category`.
 """
 from __future__ import annotations
 
@@ -75,111 +76,564 @@ _SUBJECT_MAX_WORDS = 10
 _MIN_SUBJECT_LENGTH = 4
 
 # ---------------------------------------------------------------------------
-# Animal keyword set – triggers the animal-specific shot plan.
+# Visual category string constants
 # ---------------------------------------------------------------------------
 
-_ANIMAL_KEYWORDS: frozenset[str] = frozenset({
-    # Rodents / burrowing
-    "groundhog", "groundhogs", "marmot", "marmots",
-    "squirrel", "squirrels", "chipmunk", "chipmunks",
-    "beaver", "beavers", "mole", "moles", "vole", "voles",
-    "rabbit", "rabbits", "hare", "hares",
-    # Canines / felines / bears
-    "fox", "foxes", "wolf", "wolves", "coyote", "coyotes",
-    "bear", "bears", "panda", "pandas",
-    "cat", "cats", "kitten", "kittens", "lion", "lions", "tiger", "tigers",
-    "leopard", "cheetah", "jaguar",
-    "dog", "dogs", "puppy", "puppies",
-    # Ungulates
-    "deer", "elk", "moose", "bison", "buffalo",
-    "horse", "horses", "pony", "donkey",
-    "cow", "cows", "goat", "goats", "sheep", "lamb",
-    # Primates
-    "monkey", "monkeys", "gorilla", "chimpanzee", "orangutan", "baboon",
-    # Birds
-    "bird", "birds", "eagle", "hawk", "owl", "sparrow", "robin", "crow",
-    "parrot", "penguin", "flamingo", "heron", "duck", "goose",
-    # Reptiles / amphibians
-    "snake", "snakes", "lizard", "gecko", "iguana",
-    "frog", "frogs", "toad", "turtle", "tortoise", "crocodile", "alligator",
-    # Marine
-    "fish", "whale", "dolphin", "shark", "seal", "otter", "walrus",
-    "octopus", "jellyfish",
-    # Insects
-    "bee", "bees", "honeybee", "honeybees", "butterfly", "butterflies",
-    "ant", "ants", "dragonfly", "firefly",
-    # Other
-    "raccoon", "raccoons", "badger", "skunk", "opossum", "armadillo",
-    "elephant", "elephants", "giraffe", "hippo", "rhino", "zebra",
-    "kangaroo", "koala", "wombat",
-})
+CATEGORY_ANIMAL: str = "animal"
+CATEGORY_MUSIC: str = "music"
+CATEGORY_TECHNOLOGY: str = "technology"
+CATEGORY_SCIENCE: str = "science"
+CATEGORY_HEALTH: str = "health"
+CATEGORY_BUSINESS: str = "business"
+CATEGORY_HISTORY: str = "history"
+CATEGORY_TRAVEL: str = "travel"
+CATEGORY_SPORTS: str = "sports"
+CATEGORY_EDUCATION: str = "education"
+CATEGORY_ABSTRACT: str = "abstract"
+CATEGORY_GENERAL: str = "general"  # fallback when no category matches
 
 # ---------------------------------------------------------------------------
-# Shot plans – each entry is (shot_type_label, prompt_template).
-# The template receives a single ``{subject}`` substitution.
+# Per-category keyword sets used by detect_visual_category.
 # ---------------------------------------------------------------------------
 
-#: General shot plan (cycling based on block_index) used for non-animal topics.
-_GENERAL_SHOT_PLAN: list[tuple[str, str]] = [
-    (
-        "establishing",
-        "Wide establishing shot featuring {subject}, full environment clearly "
-        "visible, natural setting, golden hour lighting, photorealistic vertical 9:16",
-    ),
-    (
-        "medium",
-        "Medium shot of {subject}, full body and surrounding context visible, "
-        "natural lighting, photorealistic vertical 9:16",
-    ),
-    (
-        "action",
-        "Dynamic action shot of {subject} in motion or engaged in activity, "
-        "energetic composition, photorealistic vertical 9:16",
-    ),
-    (
-        "detail",
-        "Contextual detail shot of {subject} within their ecosystem, environment "
-        "and surroundings prominent, photorealistic vertical 9:16",
-    ),
-    (
-        "wide_closing",
-        "Wide panoramic shot with {subject} visible in a broader landscape, "
-        "emphasizing scale and natural surroundings, photorealistic vertical 9:16",
-    ),
+_CATEGORY_KEYWORDS: dict[str, frozenset[str]] = {
+    CATEGORY_ANIMAL: frozenset({
+        # Rodents / burrowing
+        "groundhog", "groundhogs", "marmot", "marmots",
+        "squirrel", "squirrels", "chipmunk", "chipmunks",
+        "beaver", "beavers", "mole", "moles", "vole", "voles",
+        "rabbit", "rabbits", "hare", "hares",
+        # Canines / felines / large mammals
+        "fox", "foxes", "wolf", "wolves", "coyote", "coyotes",
+        "bear", "bears", "panda", "pandas",
+        "cat", "cats", "kitten", "kittens", "lion", "lions", "tiger", "tigers",
+        "leopard", "cheetah", "jaguar",
+        "dog", "dogs", "puppy", "puppies",
+        # Ungulates
+        "deer", "elk", "moose", "bison", "buffalo",
+        "horse", "horses", "pony", "donkey",
+        "cow", "cows", "goat", "goats", "sheep", "lamb",
+        # Primates
+        "monkey", "monkeys", "gorilla", "chimpanzee", "orangutan", "baboon",
+        # Birds
+        "bird", "birds", "eagle", "hawk", "owl", "sparrow", "robin", "crow",
+        "parrot", "penguin", "flamingo", "heron", "duck", "goose",
+        # Reptiles / amphibians
+        "snake", "snakes", "lizard", "gecko", "iguana",
+        "frog", "frogs", "toad", "turtle", "tortoise", "crocodile", "alligator",
+        # Marine
+        "fish", "whale", "dolphin", "shark", "seal", "otter", "walrus",
+        "octopus", "jellyfish",
+        # Insects
+        "bee", "bees", "honeybee", "honeybees", "butterfly", "butterflies",
+        "ant", "ants", "dragonfly", "firefly",
+        # Other
+        "raccoon", "raccoons", "badger", "skunk", "opossum", "armadillo",
+        "elephant", "elephants", "giraffe", "hippo", "rhino", "zebra",
+        "kangaroo", "koala", "wombat",
+    }),
+    CATEGORY_MUSIC: frozenset({
+        "music", "musical", "musician", "musicians",
+        "song", "songs", "album", "albums", "track", "tracks",
+        "guitar", "piano", "drums", "bass", "violin", "cello", "flute",
+        "trumpet", "saxophone", "synthesizer",
+        "band", "bands", "orchestra", "choir",
+        "concert", "concerts", "stage", "performance", "performances",
+        "singer", "singers", "vocalist", "vocalists",
+        "melody", "melodies", "rhythm", "beat", "harmony", "chord", "chords",
+        "recording", "studio", "studios", "lyrics",
+        "jazz", "rock", "pop", "classical", "rap", "hip", "indie", "electronic",
+        "playlist", "streaming", "soundtrack",
+    }),
+    CATEGORY_TECHNOLOGY: frozenset({
+        "technology", "technologies", "tech", "digital",
+        "computer", "computers", "software", "hardware",
+        "internet", "web", "network", "networks", "server", "servers",
+        "robot", "robots", "automation", "drone", "drones",
+        "app", "apps", "application", "applications",
+        "mobile", "smartphone", "smartphones", "cloud",
+        "cybersecurity", "blockchain",
+        "algorithm", "algorithms", "code", "coding", "programming",
+        "developer", "developers", "innovation", "innovations",
+        "machine", "neural", "processor", "processors",
+        "semiconductor", "semiconductors",
+        "virtual", "augmented", "artificial", "intelligence", "data",
+        "database", "databases", "api", "cpu", "gpu",
+    }),
+    CATEGORY_SCIENCE: frozenset({
+        "science", "sciences", "scientific",
+        "biology", "chemistry", "physics", "astronomy", "geology", "ecology",
+        "experiment", "experiments", "research", "laboratory", "lab", "labs",
+        "discovery", "discoveries", "species", "evolution",
+        "cell", "cells", "atom", "atoms", "molecule", "molecules",
+        "fossil", "fossils", "planet", "planets", "galaxy", "galaxies",
+        "climate", "environment", "environmental",
+        "ecosystem", "ecosystems", "biodiversity",
+        "quantum", "genetics", "genome", "neuroscience", "botany", "zoology",
+        "thermodynamics", "astrophysics",
+    }),
+    CATEGORY_HEALTH: frozenset({
+        "health", "healthy", "wellness", "wellbeing",
+        "fitness", "exercise", "exercises", "workout", "workouts",
+        "nutrition", "diet", "nutrient", "nutrients", "supplement", "supplements",
+        "medical", "medicine", "doctor", "doctors", "hospital", "hospitals",
+        "therapy", "therapies", "yoga", "meditation", "mindfulness",
+        "sleep", "hydration",
+        "disease", "diseases", "treatment", "treatments",
+        "vaccine", "vaccines", "surgery", "surgeries",
+        "mental", "body", "mind",
+        "physiotherapy", "rehabilitation", "cardio",
+        "immunity", "immune", "pharmaceutical", "pharmaceuticals",
+        "symptom", "symptoms", "diagnosis", "cure", "cures", "healing",
+    }),
+    CATEGORY_BUSINESS: frozenset({
+        "business", "businesses", "finance", "financial",
+        "money", "investment", "investments",
+        "entrepreneur", "entrepreneurs",
+        "company", "companies", "corporation", "corporations",
+        "market", "markets", "marketing", "sales",
+        "revenue", "revenues", "profit", "profits",
+        "economy", "economies", "stock", "stocks",
+        "brand", "brands", "product", "products",
+        "customer", "customers", "strategy", "strategies",
+        "management", "leadership", "ceo",
+        "office", "offices", "corporate", "trade", "trading",
+        "commerce", "commercial", "retail",
+        "enterprise", "enterprises", "dividend",
+        "budget", "budgets", "accounting", "audit", "merger", "franchise",
+    }),
+    CATEGORY_HISTORY: frozenset({
+        "history", "historical", "ancient", "medieval", "renaissance",
+        "war", "wars", "battle", "battles",
+        "empire", "empires", "civilization", "civilizations",
+        "culture", "cultures", "tradition", "traditions",
+        "heritage", "monument", "monuments",
+        "artifact", "artifacts", "archive", "archives",
+        "museum", "museums", "era", "eras",
+        "century", "centuries", "decade", "decades",
+        "revolution", "revolutions", "dynasty", "dynasties",
+        "archaeological", "archaeology",
+        "pharaoh", "knight", "knights", "viking", "vikings", "samurai",
+        "colonial", "colonialism", "independence",
+        "mythology", "legend", "legends", "folklore",
+        "biography", "biographies",
+    }),
+    CATEGORY_TRAVEL: frozenset({
+        "travel", "traveling", "travelling",
+        "journey", "destination", "destinations",
+        "trip", "trips", "tourism", "tourist", "tourists",
+        "adventure", "adventures", "explore", "exploration", "wanderlust",
+        "vacation", "vacations", "holiday", "holidays",
+        "country", "countries", "city", "cities",
+        "landscape", "landscapes",
+        "hotel", "hotels", "flight", "flights",
+        "backpacking", "cruise", "cruises",
+        "hiking", "hike", "beach", "beaches",
+        "mountain", "mountains", "island", "islands",
+        "resort", "resorts", "passport", "visa", "airport", "airline", "airlines",
+        "sightseeing", "souvenir", "souvenirs", "itinerary",
+    }),
+    CATEGORY_SPORTS: frozenset({
+        "sport", "sports", "athlete", "athletes", "athletics",
+        "football", "soccer", "basketball", "baseball",
+        "tennis", "golf", "swimming", "swim",
+        "running", "run", "marathon", "marathons",
+        "cycling", "cycle", "skiing", "ski", "gymnastics",
+        "competition", "competitions", "tournament", "tournaments",
+        "championship", "championships",
+        "training", "train", "coach", "coaches",
+        "team", "teams", "stadium", "stadiums",
+        "score", "scores", "trophy", "trophies",
+        "player", "players", "league", "leagues",
+        "olympic", "olympics", "race", "races", "sprint",
+    }),
+    CATEGORY_EDUCATION: frozenset({
+        "education", "educational", "learning",
+        "school", "schools", "university", "universities",
+        "college", "colleges",
+        "student", "students", "teacher", "teachers",
+        "professor", "professors",
+        "class", "classes", "lesson", "lessons",
+        "curriculum", "knowledge", "skill", "skills",
+        "course", "courses", "workshop", "workshops",
+        "degree", "degrees", "study", "academic", "academics",
+        "scholarship", "scholarships",
+        "textbook", "textbooks", "lecture", "lectures",
+        "kindergarten", "elementary", "secondary",
+        "tutoring", "tutor", "tutors",
+        "exam", "exams", "homework", "literacy", "numeracy", "campus",
+    }),
+    CATEGORY_ABSTRACT: frozenset({
+        "motivation", "motivational", "inspiration", "inspirational",
+        "mindset", "success", "growth", "change",
+        "purpose", "meaning", "philosophy", "philosophical",
+        "wisdom", "happiness", "fear", "courage",
+        "dream", "dreams", "goal", "goals", "potential",
+        "gratitude", "resilience", "perseverance", "ambition",
+        "confidence", "improvement", "legacy", "vision",
+        "values", "belief", "beliefs", "transformation",
+        "empowerment", "positivity", "reflection",
+        "vulnerability", "authenticity",
+    }),
+}
+
+# Detection priority: more specific / distinctive categories first.
+# CATEGORY_GENERAL is the implicit fallback and is not in this list.
+_CATEGORY_DETECTION_ORDER: list[str] = [
+    CATEGORY_ANIMAL,
+    CATEGORY_MUSIC,
+    CATEGORY_TECHNOLOGY,
+    CATEGORY_SCIENCE,
+    CATEGORY_HEALTH,
+    CATEGORY_BUSINESS,
+    CATEGORY_HISTORY,
+    CATEGORY_TRAVEL,
+    CATEGORY_SPORTS,
+    CATEGORY_EDUCATION,
+    CATEGORY_ABSTRACT,
 ]
 
-#: Animal-specific shot plan that rotates through habitat / behaviour /
-#: ecosystem compositions to avoid repeated close-up portraits.
-_ANIMAL_SHOT_PLAN: list[tuple[str, str]] = [
-    (
-        "animal_establishing",
-        "Wide establishing shot of {subject} in natural habitat, full environment "
-        "visible, lush surroundings, animal present in scene, "
-        "photorealistic vertical 9:16",
-    ),
-    (
-        "animal_medium_fullbody",
-        "Medium full-body shot of {subject} near its burrow or home, full body "
-        "and paws visible, natural daylight, photorealistic vertical 9:16",
-    ),
-    (
-        "animal_foraging",
-        "Dynamic shot of {subject} foraging or eating, natural behaviour and "
-        "movement clearly visible, photorealistic vertical 9:16",
-    ),
-    (
-        "animal_habitat_detail",
-        "Ground-level detail shot of {subject} burrow, nest, or den entrance, "
-        "habitat texture and environment context visible, "
-        "photorealistic vertical 9:16",
-    ),
-    (
-        "animal_ecosystem_wide",
-        "Wide ecosystem shot with {subject} small in frame, surrounded by "
-        "plants, flowers, and natural landscape, environmental context, "
-        "photorealistic vertical 9:16",
-    ),
-]
+# ---------------------------------------------------------------------------
+# Per-category shot plans – each entry is (shot_type_label, prompt_template).
+# Templates receive a single ``{subject}`` substitution.
+# ---------------------------------------------------------------------------
+
+_CATEGORY_PLANS: dict[str, list[tuple[str, str]]] = {
+    CATEGORY_ANIMAL: [
+        (
+            "animal_establishing",
+            "Wide establishing shot of {subject} in natural habitat, full environment "
+            "visible, lush surroundings, animal present in scene, "
+            "photorealistic vertical 9:16",
+        ),
+        (
+            "animal_medium_fullbody",
+            "Medium full-body shot of {subject} near its burrow or home, full body "
+            "and paws visible, natural daylight, photorealistic vertical 9:16",
+        ),
+        (
+            "animal_foraging",
+            "Dynamic shot of {subject} foraging or eating, natural behaviour and "
+            "movement clearly visible, photorealistic vertical 9:16",
+        ),
+        (
+            "animal_habitat_detail",
+            "Ground-level detail shot of {subject} burrow, nest, or den entrance, "
+            "habitat texture and environment context visible, "
+            "photorealistic vertical 9:16",
+        ),
+        (
+            "animal_ecosystem_wide",
+            "Wide ecosystem shot with {subject} small in frame, surrounded by "
+            "plants, flowers, and natural landscape, environmental context, "
+            "photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_MUSIC: [
+        (
+            "music_establishing",
+            "Wide atmospheric shot of concert hall, stage, or recording studio for "
+            "{subject}, dramatic stage lighting, photorealistic vertical 9:16",
+        ),
+        (
+            "music_performer_action",
+            "Dynamic shot of musician performing {subject}, instrument in motion, "
+            "expressive hands and body movement, photorealistic vertical 9:16",
+        ),
+        (
+            "music_instrument_detail",
+            "Close-up detail of musical instrument, mixing board, or recording "
+            "equipment for {subject}, no readable labels or text, "
+            "photorealistic vertical 9:16",
+        ),
+        (
+            "music_crowd_energy",
+            "Wide crowd or audience shot during {subject} performance, movement, "
+            "energy, and emotion visible, photorealistic vertical 9:16",
+        ),
+        (
+            "music_closing_wide",
+            "Cinematic wide stage or outdoor festival panorama for {subject}, "
+            "dramatic lighting and silhouettes, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_TECHNOLOGY: [
+        (
+            "tech_establishing",
+            "Wide shot of modern technology workspace, data centre, or innovation "
+            "lab for {subject}, photorealistic vertical 9:16",
+        ),
+        (
+            "tech_human_interaction",
+            "Person actively engaging with technology related to {subject}, "
+            "focused and purposeful, photorealistic vertical 9:16",
+        ),
+        (
+            "tech_concept_detail",
+            "Close-up of circuit board, device screen, or interface for {subject}, "
+            "no readable text or code visible, photorealistic vertical 9:16",
+        ),
+        (
+            "tech_real_world_impact",
+            "Real-world application scene showing the effect of {subject} technology "
+            "on everyday life, photorealistic vertical 9:16",
+        ),
+        (
+            "tech_closing_wide",
+            "Futuristic cityscape or panoramic technology environment for {subject}, "
+            "glowing lights and modern architecture, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_SCIENCE: [
+        (
+            "science_establishing",
+            "Wide shot of natural environment, observatory, or research station for "
+            "{subject}, photorealistic vertical 9:16",
+        ),
+        (
+            "science_researcher_action",
+            "Scientist or researcher at work studying {subject}, focused activity "
+            "visible, photorealistic vertical 9:16",
+        ),
+        (
+            "science_specimen_detail",
+            "Microscopic, geological, or biological detail related to {subject}, "
+            "textures and patterns visible, photorealistic vertical 9:16",
+        ),
+        (
+            "science_ecological_context",
+            "Ecological or experimental context for {subject}, natural processes "
+            "in motion, photorealistic vertical 9:16",
+        ),
+        (
+            "science_panoramic_wide",
+            "Wide panoramic natural or scientific landscape featuring {subject}, "
+            "scale and environment prominent, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_HEALTH: [
+        (
+            "health_establishing",
+            "Wide healthy lifestyle or medical environment for {subject}, bright "
+            "and clean setting, photorealistic vertical 9:16",
+        ),
+        (
+            "health_activity",
+            "Person engaged in wellness activity related to {subject}, movement "
+            "and vitality visible, photorealistic vertical 9:16",
+        ),
+        (
+            "health_detail",
+            "Close-up detail of food, equipment, or body related to {subject}, "
+            "no text labels or packaging visible, photorealistic vertical 9:16",
+        ),
+        (
+            "health_emotional_context",
+            "Calm and supportive social or emotional wellbeing scene for {subject}, "
+            "natural expressions and warmth, photorealistic vertical 9:16",
+        ),
+        (
+            "health_closing_wide",
+            "Wide serene outdoor or wellness environment for {subject}, natural "
+            "light and open space, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_BUSINESS: [
+        (
+            "business_establishing",
+            "Wide shot of professional office, financial district, or commercial "
+            "environment for {subject}, photorealistic vertical 9:16",
+        ),
+        (
+            "business_collaboration",
+            "Team collaborating or professional working on {subject}, engaged and "
+            "focused, photorealistic vertical 9:16",
+        ),
+        (
+            "business_detail",
+            "Close-up of business tools, devices, or charts for {subject}, no "
+            "readable text or numbers, photorealistic vertical 9:16",
+        ),
+        (
+            "business_customer_context",
+            "Customer interaction or product in use scene for {subject}, real-world "
+            "commercial context, photorealistic vertical 9:16",
+        ),
+        (
+            "business_closing_wide",
+            "Wide professional environment panorama for {subject}, modern "
+            "architecture and activity visible, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_HISTORY: [
+        (
+            "history_establishing",
+            "Wide shot of historical setting, monument, or landscape for {subject}, "
+            "authentic period atmosphere, photorealistic vertical 9:16",
+        ),
+        (
+            "history_human_activity",
+            "People in historical or cultural context engaged with {subject}, "
+            "authentic period detail, photorealistic vertical 9:16",
+        ),
+        (
+            "history_artifact_detail",
+            "Close-up of historical artifact, architecture, or cultural object "
+            "related to {subject}, no readable inscriptions, "
+            "photorealistic vertical 9:16",
+        ),
+        (
+            "history_cultural_context",
+            "Cultural ceremony, traditional practice, or significant historical "
+            "moment for {subject}, photorealistic vertical 9:16",
+        ),
+        (
+            "history_panoramic_wide",
+            "Wide panoramic historical or cultural landscape for {subject}, sense "
+            "of place and time, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_TRAVEL: [
+        (
+            "travel_establishing",
+            "Wide establishing shot of travel destination or natural landscape for "
+            "{subject}, inviting and atmospheric, photorealistic vertical 9:16",
+        ),
+        (
+            "travel_exploration",
+            "Traveller actively exploring or experiencing {subject} location, "
+            "movement and discovery visible, photorealistic vertical 9:16",
+        ),
+        (
+            "travel_local_detail",
+            "Local architecture, cuisine, or cultural object detail for {subject}, "
+            "no visible text or signs, photorealistic vertical 9:16",
+        ),
+        (
+            "travel_atmosphere",
+            "Local street scene, market, or social activity for {subject} "
+            "destination, vibrant and authentic, photorealistic vertical 9:16",
+        ),
+        (
+            "travel_sunset_wide",
+            "Panoramic sunset or golden hour wide shot of {subject} destination, "
+            "dramatic light and landscape, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_SPORTS: [
+        (
+            "sports_establishing",
+            "Wide establishing shot of sports stadium, venue, or outdoor sports "
+            "setting for {subject}, photorealistic vertical 9:16",
+        ),
+        (
+            "sports_athlete_action",
+            "Dynamic athlete in motion performing {subject}, peak action and "
+            "energy, photorealistic vertical 9:16",
+        ),
+        (
+            "sports_equipment_detail",
+            "Close-up of sports equipment or technique detail for {subject}, no "
+            "visible branding text, photorealistic vertical 9:16",
+        ),
+        (
+            "sports_competition_context",
+            "Team competition, race, or match scene for {subject}, crowd and "
+            "competitive atmosphere, photorealistic vertical 9:16",
+        ),
+        (
+            "sports_closing_wide",
+            "Wide panoramic sports environment or landscape with {subject} activity "
+            "in context, dramatic lighting, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_EDUCATION: [
+        (
+            "education_establishing",
+            "Wide shot of classroom, library, or inspiring learning environment "
+            "for {subject}, photorealistic vertical 9:16",
+        ),
+        (
+            "education_learning_activity",
+            "Student or learner engaged with {subject} material, focused and "
+            "curious, photorealistic vertical 9:16",
+        ),
+        (
+            "education_concept_visual",
+            "Visual diagram, map, model, or conceptual illustration for {subject}, "
+            "no readable text labels, photorealistic vertical 9:16",
+        ),
+        (
+            "education_instructor_context",
+            "Teacher or expert sharing knowledge about {subject}, engaged "
+            "interaction visible, photorealistic vertical 9:16",
+        ),
+        (
+            "education_closing_wide",
+            "Wide inspiring educational or discovery environment for {subject}, "
+            "light and openness, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_ABSTRACT: [
+        (
+            "abstract_establishing",
+            "Wide evocative environmental or symbolic scene suggesting {subject}, "
+            "atmospheric and thought-provoking, photorealistic vertical 9:16",
+        ),
+        (
+            "abstract_symbolic_action",
+            "Person taking meaningful or transformative action related to {subject}, "
+            "visual metaphor, photorealistic vertical 9:16",
+        ),
+        (
+            "abstract_metaphorical_detail",
+            "Close-up symbolic or metaphorical detail representing {subject}, "
+            "textures and shapes, photorealistic vertical 9:16",
+        ),
+        (
+            "abstract_emotional_context",
+            "Emotionally resonant scene illustrating themes of {subject}, warmth "
+            "and authenticity, photorealistic vertical 9:16",
+        ),
+        (
+            "abstract_closing_wide",
+            "Cinematic wide shot with hopeful or inspiring atmosphere embodying "
+            "{subject}, golden light and movement, photorealistic vertical 9:16",
+        ),
+    ],
+    CATEGORY_GENERAL: [
+        (
+            "establishing",
+            "Wide establishing shot featuring {subject}, full environment clearly "
+            "visible, natural setting, golden hour lighting, photorealistic vertical 9:16",
+        ),
+        (
+            "medium",
+            "Medium shot of {subject}, full body and surrounding context visible, "
+            "natural lighting, photorealistic vertical 9:16",
+        ),
+        (
+            "action",
+            "Dynamic action shot of {subject} in motion or engaged in activity, "
+            "energetic composition, photorealistic vertical 9:16",
+        ),
+        (
+            "detail",
+            "Contextual detail shot of {subject} within their ecosystem, environment "
+            "and surroundings prominent, photorealistic vertical 9:16",
+        ),
+        (
+            "wide_closing",
+            "Wide panoramic shot with {subject} visible in a broader landscape, "
+            "emphasizing scale and natural surroundings, photorealistic vertical 9:16",
+        ),
+    ],
+}
+
+# Backward-compatibility aliases kept so that callers referencing the old
+# module-level names continue to work without modification.
+_ANIMAL_SHOT_PLAN: list[tuple[str, str]] = _CATEGORY_PLANS[CATEGORY_ANIMAL]
+_GENERAL_SHOT_PLAN: list[tuple[str, str]] = _CATEGORY_PLANS[CATEGORY_GENERAL]
 
 # Suffix appended to every shot-plan prompt to discourage the image model
 # from repeating the same composition across a batch of images.
@@ -193,6 +647,30 @@ _ANTI_REPETITION_SUFFIX = (
 # ---------------------------------------------------------------------------
 
 
+def detect_visual_category(topic: str, scene_text: str = "") -> str:
+    """Return the visual category that best describes *topic* and *scene_text*.
+
+    Keywords from *topic* and *scene_text* are matched against each category's
+    keyword set in a fixed priority order.  The first category whose keywords
+    overlap with the combined text is returned.  When no category matches,
+    :data:`CATEGORY_GENERAL` is returned as a fallback.
+
+    Args:
+        topic:      Video title or subject hint (e.g. ``"guitar lessons"``).
+        scene_text: Optional raw narration text for additional signal.
+
+    Returns:
+        One of the ``CATEGORY_*`` string constants defined in this module.
+    """
+    combined_words = frozenset(
+        re.findall(r"\b\w+\b", f"{topic} {scene_text}".lower())
+    )
+    for category in _CATEGORY_DETECTION_ORDER:
+        if _CATEGORY_KEYWORDS[category].intersection(combined_words):
+            return category
+    return CATEGORY_GENERAL
+
+
 def build_image_prompt(
     scene_text: str,
     topic: str = "",
@@ -204,10 +682,11 @@ def build_image_prompt(
     """Return a visual-only image prompt for *scene_text*.
 
     When ``settings.VISUAL_SHOT_PLAN_ENABLED`` is ``True`` (the default) the
-    function selects a shot type from a rotating plan based on *block_index*,
-    uses the *topic* (or a brief subject extracted from *scene_text*) to fill
-    the template, and appends an anti-repetition constraint so that an image
-    model never produces five identical close-up portraits for the same topic.
+    function detects a :func:`visual category <detect_visual_category>` from
+    the topic and scene text, selects the matching shot plan, rotates through
+    shot types based on *block_index*, and appends an anti-repetition
+    constraint so that an image model never produces identical frames for
+    the same subject.
 
     When ``VISUAL_SHOT_PLAN_ENABLED`` is ``False`` the legacy behaviour is
     preserved: raw narration is cleaned of conversational phrases and wrapped
@@ -257,9 +736,9 @@ def _build_shot_plan_prompt(
     previous_prompts: list[str] | None,
 ) -> str:
     """Build a shot-plan prompt for *scene_text* at position *block_index*."""
+    category = detect_visual_category(topic, scene_text)
+    plan = _CATEGORY_PLANS.get(category, _CATEGORY_PLANS[CATEGORY_GENERAL])
     subject = _extract_subject(scene_text, topic)
-    is_animal = _is_animal_subject(subject)
-    plan = _ANIMAL_SHOT_PLAN if is_animal else _GENERAL_SHOT_PLAN
     shot_idx = block_index % len(plan)
     shot_type, template = plan[shot_idx]
 
@@ -269,9 +748,9 @@ def _build_shot_plan_prompt(
         "visual_prompt_built",
         block_index=block_index,
         total_blocks=total_blocks,
+        detected_visual_category=category,
         shot_type=shot_type,
         subject=subject,
-        is_animal=is_animal,
         final_visual_prompt=visual_core,
     )
 
@@ -307,9 +786,13 @@ def _extract_subject(scene_text: str, topic: str) -> str:
 
 
 def _is_animal_subject(subject: str) -> bool:
-    """Return ``True`` when *subject* contains a known animal keyword."""
-    words = re.findall(r"\b\w+\b", subject.lower())
-    return bool(_ANIMAL_KEYWORDS.intersection(words))
+    """Return ``True`` when *subject* contains a known animal keyword.
+
+    .. deprecated::
+        Use :func:`detect_visual_category` directly.  This shim is kept for
+        backward compatibility with existing callers.
+    """
+    return detect_visual_category(subject) == CATEGORY_ANIMAL
 
 
 # ---------------------------------------------------------------------------

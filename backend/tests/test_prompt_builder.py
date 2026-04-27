@@ -4,7 +4,19 @@ from __future__ import annotations
 import pytest
 
 from worker.modules.ai_images.prompt_builder import (
+    CATEGORY_ANIMAL,
+    CATEGORY_BUSINESS,
+    CATEGORY_EDUCATION,
+    CATEGORY_GENERAL,
+    CATEGORY_HEALTH,
+    CATEGORY_HISTORY,
+    CATEGORY_MUSIC,
+    CATEGORY_SCIENCE,
+    CATEGORY_SPORTS,
+    CATEGORY_TECHNOLOGY,
+    CATEGORY_TRAVEL,
     _ANIMAL_SHOT_PLAN,
+    _CATEGORY_PLANS,
     _GENERAL_SHOT_PLAN,
     _append_negative,
     _extract_subject,
@@ -13,6 +25,7 @@ from worker.modules.ai_images.prompt_builder import (
     _strip_conversational,
     _wrap_cinematic,
     build_image_prompt,
+    detect_visual_category,
 )
 
 
@@ -221,10 +234,11 @@ class TestExtractSubject:
         assert subject != long_topic
 
 
-# ── _is_animal_subject ────────────────────────────────────────────────────────
+# ── _is_animal_subject (shim) + detect_visual_category ────────────────────────
 
 
-class TestIsAnimalSubject:
+class TestDetectVisualCategory:
+    # ── animal ────────────────────────────────────────────────────────────────
     def test_groundhog_is_animal(self):
         assert _is_animal_subject("groundhog") is True
 
@@ -245,6 +259,70 @@ class TestIsAnimalSubject:
 
     def test_case_insensitive(self):
         assert _is_animal_subject("Groundhog") is True
+
+    # ── detect_visual_category: correct category per domain ───────────────────
+    def test_music_topic(self):
+        assert detect_visual_category("guitar lessons") == CATEGORY_MUSIC
+
+    def test_music_via_text(self):
+        assert detect_visual_category("", "A band performs on stage at a concert.") == CATEGORY_MUSIC
+
+    def test_technology_topic(self):
+        assert detect_visual_category("machine learning tutorial") == CATEGORY_TECHNOLOGY
+
+    def test_technology_via_text(self):
+        assert detect_visual_category("", "Developers write code on their computers.") == CATEGORY_TECHNOLOGY
+
+    def test_science_topic(self):
+        assert detect_visual_category("quantum physics") == CATEGORY_SCIENCE
+
+    def test_health_topic(self):
+        assert detect_visual_category("meditation for anxiety") == CATEGORY_HEALTH
+
+    def test_business_topic(self):
+        assert detect_visual_category("startup marketing strategy") == CATEGORY_BUSINESS
+
+    def test_history_topic(self):
+        assert detect_visual_category("ancient roman empire") == CATEGORY_HISTORY
+
+    def test_travel_topic(self):
+        assert detect_visual_category("backpacking through europe") == CATEGORY_TRAVEL
+
+    def test_sports_topic(self):
+        assert detect_visual_category("marathon training plan") == CATEGORY_SPORTS
+
+    def test_education_topic(self):
+        assert detect_visual_category("university scholarship tips") == CATEGORY_EDUCATION
+
+    def test_unknown_topic_returns_general(self):
+        assert detect_visual_category("cooking pasta carbonara") == CATEGORY_GENERAL
+
+    def test_empty_topic_and_text_returns_general(self):
+        assert detect_visual_category("", "") == CATEGORY_GENERAL
+
+    def test_animal_topic_combined_text(self):
+        assert detect_visual_category(
+            "groundhog", "Groundhogs hibernate underground in winter."
+        ) == CATEGORY_ANIMAL
+
+    def test_category_keywords_used_from_scene_text(self):
+        # Topic is blank; category detected via scene text only.
+        assert detect_visual_category(
+            "", "Athletes compete in the championship marathon race."
+        ) == CATEGORY_SPORTS
+
+    def test_all_category_plans_present(self):
+        """Every CATEGORY_* constant should have an entry in _CATEGORY_PLANS."""
+        for cat in [
+            CATEGORY_ANIMAL, CATEGORY_MUSIC, CATEGORY_TECHNOLOGY, CATEGORY_SCIENCE,
+            CATEGORY_HEALTH, CATEGORY_BUSINESS, CATEGORY_HISTORY, CATEGORY_TRAVEL,
+            CATEGORY_SPORTS, CATEGORY_EDUCATION, CATEGORY_GENERAL,
+        ]:
+            assert cat in _CATEGORY_PLANS, f"Missing plan for category: {cat!r}"
+
+    def test_each_plan_has_five_shots(self):
+        for cat, plan in _CATEGORY_PLANS.items():
+            assert len(plan) == 5, f"Plan for {cat!r} has {len(plan)} entries, expected 5"
 
 
 # ── TestShotPlanVariety ────────────────────────────────────────────────────────
@@ -284,13 +362,14 @@ class TestShotPlanVariety:
     def test_five_blocks_use_all_animal_shot_types(self):
         """Each block should map to a different shot type in the animal plan."""
         prompts = self._build_prompts()
+        animal_plan = _CATEGORY_PLANS[CATEGORY_ANIMAL]
         shot_types_used: set[str] = set()
         for i, _ in enumerate(self._TEXTS):
-            shot_idx = i % len(_ANIMAL_SHOT_PLAN)
-            shot_type, _ = _ANIMAL_SHOT_PLAN[shot_idx]
+            shot_idx = i % len(animal_plan)
+            shot_type, _ = animal_plan[shot_idx]
             shot_types_used.add(shot_type)
         # Five blocks cycling through five slots means all five shot types are used.
-        assert len(shot_types_used) == len(_ANIMAL_SHOT_PLAN)
+        assert len(shot_types_used) == len(animal_plan)
 
     def test_not_all_prompts_contain_close_up(self):
         prompts = self._build_prompts()
@@ -374,11 +453,301 @@ class TestShotPlanVariety:
             prompts.append(p)
 
         assert len(set(prompts)) == 5, "General-topic prompts must all be distinct"
-        # Each prompt should map to a different general shot type.
-        shot_types_expected = {t for t, _ in _GENERAL_SHOT_PLAN}
+        # Determine which plan was selected (topic "solar energy" has no keyword match
+        # → CATEGORY_GENERAL; if it matches another category that's also acceptable).
+        category = detect_visual_category(topic)
+        plan = _CATEGORY_PLANS[category]
+        shot_types_expected = {t for t, _ in plan}
         shot_types_found: set[str] = set()
         for i in range(5):
-            shot_idx = i % len(_GENERAL_SHOT_PLAN)
-            shot_type, _ = _GENERAL_SHOT_PLAN[shot_idx]
+            shot_idx = i % len(plan)
+            shot_type, _ = plan[shot_idx]
             shot_types_found.add(shot_type)
         assert shot_types_found == shot_types_expected
+
+
+# ── TestMusicShotVariety ──────────────────────────────────────────────────────
+
+
+class TestMusicShotVariety:
+    """Five blocks about the same music topic should produce varied music-specific prompts."""
+
+    _TEXTS = [
+        "Jazz music originated in New Orleans in the early twentieth century.",
+        "Musicians improvise melodies over complex chord progressions.",
+        "The saxophone produces its distinctive sound through a single reed.",
+        "Concert audiences experience music as a shared social event.",
+        "Recording studios capture performances for global distribution.",
+    ]
+    _TOPIC = "jazz music"
+
+    def _build_prompts(self) -> list[str]:
+        prompts: list[str] = []
+        for i, text in enumerate(self._TEXTS):
+            p = build_image_prompt(
+                text,
+                self._TOPIC,
+                block_index=i,
+                total_blocks=len(self._TEXTS),
+                previous_prompts=list(prompts),
+            )
+            prompts.append(p)
+        return prompts
+
+    def test_category_detected_as_music(self):
+        assert detect_visual_category(self._TOPIC) == CATEGORY_MUSIC
+
+    def test_five_prompts_all_distinct(self):
+        prompts = self._build_prompts()
+        assert len(set(prompts)) == 5
+
+    def test_music_specific_vocabulary_present(self):
+        """At least one prompt should reference stage, studio, instrument, or performer."""
+        prompts = self._build_prompts()
+        music_words = {"stage", "studio", "instrument", "musician", "concert",
+                       "performer", "crowd", "festival", "mixing"}
+        found = any(
+            any(w in p.lower() for w in music_words) for p in prompts
+        )
+        assert found, "No music-specific vocabulary found in any prompt"
+
+    def test_every_prompt_includes_no_text_suffix(self):
+        for p in self._build_prompts():
+            assert "No text" in p
+
+    def test_every_prompt_includes_no_captions(self):
+        for p in self._build_prompts():
+            assert "no captions" in p.lower()
+
+    def test_raw_narration_not_verbatim(self):
+        prompts = self._build_prompts()
+        raw_phrases = [
+            "originated in new orleans in the early twentieth century",
+            "improvise melodies over complex chord progressions",
+        ]
+        for phrase in raw_phrases:
+            for p in prompts:
+                assert phrase.lower() not in p.lower(), (
+                    f"Raw narration {phrase!r} found verbatim in prompt: {p!r}"
+                )
+
+    def test_five_blocks_not_all_close_up(self):
+        prompts = self._build_prompts()
+        close_up_count = sum(
+            1 for p in prompts if "close-up" in p.lower() or "close up" in p.lower()
+        )
+        assert close_up_count < len(prompts)
+
+    def test_anti_repetition_suffix_present(self):
+        for p in self._build_prompts():
+            assert "distinct" in p.lower() or "composition" in p.lower()
+
+
+# ── TestTechnologyShotVariety ─────────────────────────────────────────────────
+
+
+class TestTechnologyShotVariety:
+    """Five blocks about the same technology topic should produce varied tech-specific prompts."""
+
+    _TEXTS = [
+        "Artificial intelligence is transforming industries worldwide.",
+        "Developers write algorithms to solve complex data problems.",
+        "Microprocessors power everything from smartphones to servers.",
+        "Cloud computing enables global collaboration at unprecedented scale.",
+        "Self-driving vehicles navigate streets using computer vision.",
+    ]
+    _TOPIC = "artificial intelligence"
+
+    def _build_prompts(self) -> list[str]:
+        prompts: list[str] = []
+        for i, text in enumerate(self._TEXTS):
+            p = build_image_prompt(
+                text,
+                self._TOPIC,
+                block_index=i,
+                total_blocks=len(self._TEXTS),
+                previous_prompts=list(prompts),
+            )
+            prompts.append(p)
+        return prompts
+
+    def test_category_detected_as_technology(self):
+        assert detect_visual_category(self._TOPIC) == CATEGORY_TECHNOLOGY
+
+    def test_five_prompts_all_distinct(self):
+        prompts = self._build_prompts()
+        assert len(set(prompts)) == 5
+
+    def test_technology_specific_vocabulary_present(self):
+        """At least one prompt should reference workspace, lab, screen, or tech environment."""
+        prompts = self._build_prompts()
+        tech_words = {"workspace", "lab", "screen", "server", "interface",
+                      "circuit", "futuristic", "technology", "digital", "cityscape"}
+        found = any(
+            any(w in p.lower() for w in tech_words) for p in prompts
+        )
+        assert found, "No technology-specific vocabulary found in any prompt"
+
+    def test_every_prompt_includes_no_text_suffix(self):
+        for p in self._build_prompts():
+            assert "No text" in p
+
+    def test_every_prompt_includes_no_captions(self):
+        for p in self._build_prompts():
+            assert "no captions" in p.lower()
+
+    def test_raw_narration_not_verbatim(self):
+        prompts = self._build_prompts()
+        raw_phrases = [
+            "transforming industries worldwide",
+            "solve complex data problems",
+        ]
+        for phrase in raw_phrases:
+            for p in prompts:
+                assert phrase.lower() not in p.lower(), (
+                    f"Raw narration {phrase!r} found verbatim in prompt: {p!r}"
+                )
+
+    def test_five_blocks_not_all_close_up(self):
+        prompts = self._build_prompts()
+        close_up_count = sum(
+            1 for p in prompts if "close-up" in p.lower() or "close up" in p.lower()
+        )
+        assert close_up_count < len(prompts)
+
+    def test_anti_repetition_suffix_present(self):
+        for p in self._build_prompts():
+            assert "distinct" in p.lower() or "composition" in p.lower()
+
+
+# ── TestBusinessShotVariety ───────────────────────────────────────────────────
+
+
+class TestBusinessShotVariety:
+    """Five blocks about the same business topic should produce varied business-specific prompts."""
+
+    _TEXTS = [
+        "Startups need a clear value proposition to attract investors.",
+        "Marketing teams collaborate to develop brand awareness campaigns.",
+        "Financial charts reveal quarterly revenue trends and forecasts.",
+        "Customer service drives long-term loyalty and repeat purchases.",
+        "Entrepreneurs build global companies from small office beginnings.",
+    ]
+    _TOPIC = "startup marketing"
+
+    def _build_prompts(self) -> list[str]:
+        prompts: list[str] = []
+        for i, text in enumerate(self._TEXTS):
+            p = build_image_prompt(
+                text,
+                self._TOPIC,
+                block_index=i,
+                total_blocks=len(self._TEXTS),
+                previous_prompts=list(prompts),
+            )
+            prompts.append(p)
+        return prompts
+
+    def test_category_detected_as_business(self):
+        assert detect_visual_category(self._TOPIC) == CATEGORY_BUSINESS
+
+    def test_five_prompts_all_distinct(self):
+        prompts = self._build_prompts()
+        assert len(set(prompts)) == 5
+
+    def test_business_specific_vocabulary_present(self):
+        """At least one prompt should reference office, team, commercial, or professional."""
+        prompts = self._build_prompts()
+        biz_words = {"office", "team", "professional", "commercial", "corporate",
+                     "financial", "collaboration", "customer", "architecture", "panorama"}
+        found = any(
+            any(w in p.lower() for w in biz_words) for p in prompts
+        )
+        assert found, "No business-specific vocabulary found in any prompt"
+
+    def test_every_prompt_includes_no_text_suffix(self):
+        for p in self._build_prompts():
+            assert "No text" in p
+
+    def test_every_prompt_includes_no_captions(self):
+        for p in self._build_prompts():
+            assert "no captions" in p.lower()
+
+    def test_raw_narration_not_verbatim(self):
+        prompts = self._build_prompts()
+        raw_phrases = [
+            "clear value proposition to attract investors",
+            "develop brand awareness campaigns",
+        ]
+        for phrase in raw_phrases:
+            for p in prompts:
+                assert phrase.lower() not in p.lower(), (
+                    f"Raw narration {phrase!r} found verbatim in prompt: {p!r}"
+                )
+
+    def test_five_blocks_not_all_close_up(self):
+        prompts = self._build_prompts()
+        close_up_count = sum(
+            1 for p in prompts if "close-up" in p.lower() or "close up" in p.lower()
+        )
+        assert close_up_count < len(prompts)
+
+    def test_anti_repetition_suffix_present(self):
+        for p in self._build_prompts():
+            assert "distinct" in p.lower() or "composition" in p.lower()
+
+
+# ── TestUnknownTopicFallback ──────────────────────────────────────────────────
+
+
+class TestUnknownTopicFallback:
+    """Topics with no matching keywords should fall back to the general shot plan."""
+
+    _TEXTS = [
+        "Pasta carbonara is made with eggs, cheese, and guanciale.",
+        "The sauce must be tossed off the heat to avoid scrambling.",
+        "Traditional Roman cooks never add cream to carbonara.",
+        "The dish originated in the Lazio region of central Italy.",
+        "Proper technique separates authentic carbonara from imitations.",
+    ]
+    _TOPIC = "pasta carbonara"
+
+    def _build_prompts(self) -> list[str]:
+        prompts: list[str] = []
+        for i, text in enumerate(self._TEXTS):
+            p = build_image_prompt(
+                text,
+                self._TOPIC,
+                block_index=i,
+                total_blocks=len(self._TEXTS),
+                previous_prompts=list(prompts),
+            )
+            prompts.append(p)
+        return prompts
+
+    def test_category_is_general(self):
+        assert detect_visual_category(self._TOPIC) == CATEGORY_GENERAL
+
+    def test_five_prompts_all_distinct(self):
+        prompts = self._build_prompts()
+        assert len(set(prompts)) == 5
+
+    def test_every_prompt_includes_no_text_suffix(self):
+        for p in self._build_prompts():
+            assert "No text" in p
+
+    def test_five_blocks_not_all_close_up(self):
+        prompts = self._build_prompts()
+        close_up_count = sum(
+            1 for p in prompts if "close-up" in p.lower() or "close up" in p.lower()
+        )
+        assert close_up_count < len(prompts)
+
+    def test_raw_narration_not_verbatim(self):
+        prompts = self._build_prompts()
+        phrases = ["made with eggs, cheese, and guanciale", "scrambling"]
+        for phrase in phrases:
+            for p in prompts:
+                assert phrase.lower() not in p.lower(), (
+                    f"Raw narration {phrase!r} found verbatim in prompt: {p!r}"
+                )
