@@ -751,3 +751,143 @@ class TestUnknownTopicFallback:
                 assert phrase.lower() not in p.lower(), (
                     f"Raw narration {phrase!r} found verbatim in prompt: {p!r}"
                 )
+
+
+# ── TestVisualTags ────────────────────────────────────────────────────────────
+
+
+class TestVisualTagsDetection:
+    """visual_tags should take priority over topic and scene text in category detection."""
+
+    def test_tags_override_vague_topic(self):
+        """History tags must produce HISTORY even when topic gives no signal."""
+        category = detect_visual_category(
+            "interesting facts",
+            visual_tags=["architecture", "empire", "ancient"],
+        )
+        assert category == CATEGORY_HISTORY
+
+    def test_history_tags_override_funny_instruction_topic(self):
+        """Tags: history keywords; topic: vague instruction.  Category -> HISTORY."""
+        category = detect_visual_category(
+            "Make it funny and simple",
+            scene_text="Explain this in a storytelling tone.",
+            visual_tags=["architecture", "soldiers", "roman roads"],
+        )
+        assert category == CATEGORY_HISTORY
+
+    def test_music_tags_override_generic_topic(self):
+        category = detect_visual_category(
+            "short video about stuff",
+            visual_tags=["guitar", "stage", "concert"],
+        )
+        assert category == CATEGORY_MUSIC
+
+    def test_technology_tags_override_generic_topic(self):
+        category = detect_visual_category(
+            "something cool",
+            visual_tags=["robot", "software", "server"],
+        )
+        assert category == CATEGORY_TECHNOLOGY
+
+    def test_no_tags_falls_through_to_topic(self):
+        """No tags -> normal topic-based detection still works."""
+        assert detect_visual_category("guitar lessons", visual_tags=None) == CATEGORY_MUSIC
+        assert detect_visual_category("guitar lessons", visual_tags=[]) == CATEGORY_MUSIC
+
+    def test_empty_tags_ignored(self):
+        """Empty/whitespace tags must not cause errors or influence detection."""
+        category = detect_visual_category("guitar lessons", visual_tags=["", "  "])
+        assert category == CATEGORY_MUSIC
+
+    def test_tags_passed_to_build_image_prompt(self):
+        """visual_tags kwarg must be accepted by build_image_prompt without error."""
+        prompt = build_image_prompt(
+            "Ancient Rome was the center of a vast empire.",
+            "interesting facts",
+            block_index=0,
+            total_blocks=5,
+            visual_tags=["architecture", "empire", "soldiers"],
+        )
+        assert "No text" in prompt
+        assert prompt.strip() != ""
+
+    def test_five_blocks_with_history_tags_produce_history_prompts(self):
+        """When visual_tags drive HISTORY detection, prompts use the history shot plan."""
+        texts = [
+            "Ancient Rome was founded according to legend in 753 BC.",
+            "The Roman Forum served as the centre of civic life.",
+            "Legions marched across Europe to expand the empire.",
+            "Trade routes connected Rome to distant civilisations.",
+            "The fall of Rome marked the end of an era in history.",
+        ]
+        topic = "Ancient Rome"
+        tags = ["architecture", "empire", "soldiers", "marketplace"]
+        prompts: list[str] = []
+        for i, text in enumerate(texts):
+            p = build_image_prompt(
+                text,
+                topic,
+                block_index=i,
+                total_blocks=5,
+                visual_tags=tags,
+            )
+            prompts.append(p)
+
+        assert len(set(prompts)) == 5
+        for p in prompts:
+            assert "No text" in p
+
+    def test_extract_subject_uses_first_tag_as_hint(self):
+        """When topic is long/absent and text has no good subject, first tag is used."""
+        subject = _extract_subject(
+            "Hey!",
+            "",
+            visual_tags=["architecture"],
+        )
+        assert subject == "architecture"
+
+    def test_extract_subject_still_prefers_concise_topic(self):
+        """If topic is short and clear, it takes priority over tags."""
+        subject = _extract_subject(
+            "Hey!",
+            "ancient rome",
+            visual_tags=["architecture"],
+        )
+        assert subject == "ancient rome"
+
+
+# ── TestTagNormalization ──────────────────────────────────────────────────────
+
+
+class TestTagNormalization:
+    """_normalize_visual_tags helper (from pipeline module) correctness."""
+
+    def test_comma_string_normalizes_to_list(self):
+        from worker.tasks.video_pipeline import _normalize_visual_tags
+        result = _normalize_visual_tags("architecture, marketplace, soldiers")
+        assert result == ["architecture", "marketplace", "soldiers"]
+
+    def test_list_input_preserved(self):
+        from worker.tasks.video_pipeline import _normalize_visual_tags
+        result = _normalize_visual_tags(["Architecture", "SOLDIERS"])
+        assert result == ["architecture", "soldiers"]
+
+    def test_empty_string_returns_empty_list(self):
+        from worker.tasks.video_pipeline import _normalize_visual_tags
+        assert _normalize_visual_tags("") == []
+
+    def test_none_returns_empty_list(self):
+        from worker.tasks.video_pipeline import _normalize_visual_tags
+        assert _normalize_visual_tags(None) == []
+
+    def test_blank_items_stripped(self):
+        from worker.tasks.video_pipeline import _normalize_visual_tags
+        result = _normalize_visual_tags("architecture,  , soldiers")
+        assert "" not in result
+        assert "architecture" in result
+        assert "soldiers" in result
+
+    def test_whitespace_only_string_returns_empty(self):
+        from worker.tasks.video_pipeline import _normalize_visual_tags
+        assert _normalize_visual_tags("   ") == []

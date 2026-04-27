@@ -29,6 +29,8 @@ const schema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   script: z.string().optional(),
   topic: z.string().optional(),
+  prompt: z.string().optional(),
+  visual_tags: z.string().optional(),
   voice_name: z.string().min(1, 'Voice is required'),
   caption_style: z.enum(['none', 'basic', 'bold_center', 'boxed', 'large_bottom', 'karaoke_placeholder']),
   dry_run: z.boolean(),
@@ -64,6 +66,8 @@ export default function CreateJobForm() {
         title: data.title,
         script: scriptMode === 'manual' ? data.script : undefined,
         topic: scriptMode === 'ai' ? data.topic : undefined,
+        prompt: scriptMode === 'ai' ? (data.prompt || undefined) : undefined,
+        visual_tags: scriptMode === 'ai' ? (data.visual_tags || undefined) : undefined,
         voice_name: data.voice_name,
         caption_style: data.caption_style,
         dry_run: data.dry_run,
@@ -139,13 +143,36 @@ export default function CreateJobForm() {
           />
         </div>
       ) : (
-        <div className="space-y-2">
-          <Label htmlFor="topic">Topic / Prompt</Label>
-          <Input
-            id="topic"
-            placeholder="e.g. Top 5 productivity tips for developers"
-            {...register('topic')}
-          />
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="topic">Topic <span className="text-red-400">*</span></Label>
+            <Input
+              id="topic"
+              placeholder="e.g. Ancient Rome, AI in everyday life, jazz music"
+              {...register('topic')}
+            />
+            {errors.topic && <p className="text-xs text-red-400">{errors.topic.message}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="prompt">Prompt / Instructions</Label>
+            <Textarea
+              id="prompt"
+              rows={3}
+              placeholder="Optional: tone, audience, angle, structure, or specific points to cover"
+              {...register('prompt')}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="visual_tags">Visual Tags</Label>
+            <Input
+              id="visual_tags"
+              placeholder="Optional: history, architecture, daily life, empire"
+              {...register('visual_tags')}
+            />
+            <p className="text-xs text-gray-500">Comma-separated tags to guide visual planning</p>
+          </div>
         </div>
       )}
 

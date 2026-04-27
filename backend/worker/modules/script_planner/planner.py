@@ -77,6 +77,7 @@ def plan_script_scenes(
     min_seconds: float | None = None,
     max_seconds: float | None = None,
     topic: str = "",
+    visual_tags: list[str] | None = None,
 ) -> list[ScriptScene]:
     """Convert a narration script into a list of timed :class:`ScriptScene` objects.
 
@@ -128,7 +129,7 @@ def plan_script_scenes(
     chunks = _group_sentences(sentences, n_scenes)
 
     # Build scenes, assigning proportional timings when audio_duration is known.
-    scenes = _build_scenes(chunks, audio_duration, topic=topic)
+    scenes = _build_scenes(chunks, audio_duration, topic=topic, visual_tags=visual_tags)
     logger.info(
         "script_scenes_planned",
         n_scenes=len(scenes),
@@ -169,6 +170,7 @@ def _make_image_prompt(
     block_index: int = 0,
     total_blocks: int = 1,
     previous_prompts: list[str] | None = None,
+    visual_tags: list[str] | None = None,
 ) -> str:
     """Convert a scene text chunk into a focused visual image prompt.
 
@@ -183,6 +185,7 @@ def _make_image_prompt(
         block_index=block_index,
         total_blocks=total_blocks,
         previous_prompts=previous_prompts,
+        visual_tags=visual_tags,
     )
 
 
@@ -197,6 +200,7 @@ def _build_scenes(
     chunks: list[str],
     audio_duration: float | None,
     topic: str = "",
+    visual_tags: list[str] | None = None,
 ) -> list[ScriptScene]:
     """Construct :class:`ScriptScene` objects with optional proportional timing."""
     total_chars = sum(len(c) for c in chunks) or len(chunks)  # guard zero
@@ -227,6 +231,7 @@ def _build_scenes(
             block_index=i,
             total_blocks=total,
             previous_prompts=previous_prompts,
+            visual_tags=visual_tags,
         )
         previous_prompts.append(prompt)
 
@@ -325,7 +330,11 @@ def _merge_short_blocks(blocks: list[str]) -> list[str]:
     return result
 
 
-def plan_narration_blocks(script_text: str, topic: str = "") -> list[NarrationBlock]:
+def plan_narration_blocks(
+    script_text: str,
+    topic: str = "",
+    visual_tags: list[str] | None = None,
+) -> list[NarrationBlock]:
     """Split *script_text* into semantic :class:`NarrationBlock` objects.
 
     **Splitting strategy**:
@@ -339,9 +348,13 @@ def plan_narration_blocks(script_text: str, topic: str = "") -> list[NarrationBl
        TTS audio or a useful AI image.
 
     Args:
-        script_text: Full narration text (may be empty).
-        topic:       Optional global topic / title used by the shot-plan
-                     system to build visually varied prompts.
+        script_text:  Full narration text (may be empty).
+        topic:        Optional global topic / title used by the shot-plan
+                      system to build visually varied prompts.
+        visual_tags:  Optional list of explicit visual tags supplied by the
+                      user (e.g. ``["architecture", "soldiers"]``).  Passed
+                      through to :func:`build_image_prompt` for category
+                      detection and subject extraction.
 
     Returns:
         Ordered list of :class:`NarrationBlock` objects (at least one).
@@ -373,6 +386,7 @@ def plan_narration_blocks(script_text: str, topic: str = "") -> list[NarrationBl
             block_index=i,
             total_blocks=total,
             previous_prompts=previous_prompts,
+            visual_tags=visual_tags,
         )
         previous_prompts.append(prompt)
         blocks.append(

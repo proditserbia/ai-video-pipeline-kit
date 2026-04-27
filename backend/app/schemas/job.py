@@ -32,6 +32,13 @@ class JobCreate(JobBase):
     # by the create_job endpoint so the worker can read them.
     script: str | None = None
     topic: str | None = None
+    # prompt / instructions — optional guidance for script generation (tone,
+    # audience, angle, etc.).  Separate from topic so that visual planning
+    # always uses the topic, not the instructions.
+    prompt: str | None = None
+    # visual_tags — comma-separated string or list of tag strings used to
+    # guide visual category detection and image prompt generation.
+    visual_tags: list[str] | str | None = None
     voice_name: str = "en-US-AriaNeural"
     caption_style: str = "basic"
 
@@ -125,6 +132,21 @@ class JobResponse(JobBase):
             if isinstance(script_cfg, dict):
                 t = script_cfg.get("topic", "")
         return t or None
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def prompt(self) -> str | None:
+        """Script generation instructions / prompt (distinct from topic)."""
+        return (self.input_data or {}).get("prompt") or None
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def visual_tags(self) -> list[str]:
+        """Visual planning tags resolved from input_data."""
+        raw = (self.input_data or {}).get("visual_tags")
+        if isinstance(raw, list):
+            return [str(t) for t in raw if str(t).strip()]
+        return []
 
     @computed_field  # type: ignore[misc]
     @property

@@ -82,17 +82,31 @@ async def create_job(
 ) -> JobResponse:
     from app.config import settings as app_settings
 
+    # Normalise visual_tags to list[str] regardless of whether the caller
+    # sends a comma-separated string or an already-parsed list.
+    def _normalise_tags(raw) -> list[str]:
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        return [t.strip().lower() for t in raw if t.strip()]
+
     # Build input_data from convenience fields when the caller (dashboard form)
     # sends script/topic/voice_name/caption_style instead of a raw input_data blob.
     if body.input_data is None:
         input_data: dict = {
             "script_text": body.script or "",
             "topic": body.topic or "",
+            "prompt": body.prompt or "",
+            "visual_tags": _normalise_tags(body.visual_tags),
             "voice": body.voice_name,
             "caption_style": body.caption_style,
         }
     else:
         input_data = body.input_data
+        # Normalise visual_tags inside raw input_data blobs too.
+        if "visual_tags" in input_data:
+            input_data["visual_tags"] = _normalise_tags(input_data["visual_tags"])
 
     job = Job(
         id=str(uuid.uuid4()),

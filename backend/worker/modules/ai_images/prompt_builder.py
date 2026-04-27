@@ -217,6 +217,11 @@ _CATEGORY_KEYWORDS: dict[str, frozenset[str]] = {
         "colonial", "colonialism", "independence",
         "mythology", "legend", "legends", "folklore",
         "biography", "biographies",
+        # Architecture and military terms commonly used as visual tags for historical content.
+        "soldier", "soldiers", "army", "armies", "legion", "legions",
+        "architecture", "architectural", "ruins", "ruin",
+        "roman", "rome", "greece", "greek", "egypt", "egyptian",
+        "medieval", "fortress", "castle", "castles",
     }),
     CATEGORY_TRAVEL: frozenset({
         "travel", "traveling", "travelling",
@@ -647,27 +652,55 @@ _ANTI_REPETITION_SUFFIX = (
 # ---------------------------------------------------------------------------
 
 
-def detect_visual_category(topic: str, scene_text: str = "") -> str:
-    """Return the visual category that best describes *topic* and *scene_text*.
+def detect_visual_category(
+    topic: str,
+    scene_text: str = "",
+    visual_tags: list[str] | None = None,
+) -> str:
+    """Return the visual category that best describes the content.
 
-    Keywords from *topic* and *scene_text* are matched against each category's
+    Detection priority:
+    1. *visual_tags* — explicit tags supplied by the user (highest signal).
+    2. *topic* / title — the video subject.
+    3. *scene_text* — raw narration text (lowest signal).
+
+    Keywords from all three sources are matched against each category's
     keyword set in a fixed priority order.  The first category whose keywords
     overlap with the combined text is returned.  When no category matches,
     :data:`CATEGORY_GENERAL` is returned as a fallback.
 
     Args:
-        topic:      Video title or subject hint (e.g. ``"guitar lessons"``).
-        scene_text: Optional raw narration text for additional signal.
+        topic:       Video title or subject hint (e.g. ``"guitar lessons"``).
+        scene_text:  Optional raw narration text for additional signal.
+        visual_tags: Optional list of explicit visual tags (e.g.
+                     ``["architecture", "soldiers"]``).  These are checked
+                     *before* topic and scene text so that a tag such as
+                     ``"history"`` overrides a vague topic like
+                     ``"interesting facts"``.
 
     Returns:
         One of the ``CATEGORY_*`` string constants defined in this module.
     """
-    combined_words = frozenset(
+    # Build separate word sets so that tags get priority over topic/text.
+    tag_words: frozenset[str] = frozenset(
+        re.findall(r"\b\w+\b", " ".join(visual_tags or []).lower())
+    )
+    topic_words: frozenset[str] = frozenset(
         re.findall(r"\b\w+\b", f"{topic} {scene_text}".lower())
     )
+    combined_words = tag_words | topic_words
+
+    # First pass: check tags-only words for a match (highest priority).
+    if tag_words:
+        for category in _CATEGORY_DETECTION_ORDER:
+            if _CATEGORY_KEYWORDS[category].intersection(tag_words):
+                return category
+
+    # Second pass: check topic + scene text.
     for category in _CATEGORY_DETECTION_ORDER:
         if _CATEGORY_KEYWORDS[category].intersection(combined_words):
             return category
+
     return CATEGORY_GENERAL
 
 
@@ -678,15 +711,16 @@ def build_image_prompt(
     block_index: int = 0,
     total_blocks: int = 1,
     previous_prompts: list[str] | None = None,
+    visual_tags: list[str] | None = None,
 ) -> str:
     """Return a visual-only image prompt for *scene_text*.
 
     When ``settings.VISUAL_SHOT_PLAN_ENABLED`` is ``True`` (the default) the
     function detects a :func:`visual category <detect_visual_category>` from
-    the topic and scene text, selects the matching shot plan, rotates through
-    shot types based on *block_index*, and appends an anti-repetition
-    constraint so that an image model never produces identical frames for
-    the same subject.
+    the topic, visual tags, and scene text, selects the matching shot plan,
+    rotates through shot types based on *block_index*, and appends an
+    anti-repetition constraint so that an image model never produces identical
+    frames for the same subject.
 
     When ``VISUAL_SHOT_PLAN_ENABLED`` is ``False`` the legacy behaviour is
     preserved: raw narration is cleaned of conversational phrases and wrapped
@@ -699,6 +733,9 @@ def build_image_prompt(
         total_blocks:     Total number of blocks in the video.
         previous_prompts: Prompts already generated for preceding blocks
                           (reserved for future similarity checks).
+        visual_tags:      Optional list of explicit visual tags supplied by
+                          the user to guide category detection and subject
+                          extraction.
 
     Returns:
         A clean, visual-only prompt string ready to send to an image model.
@@ -710,6 +747,7 @@ def build_image_prompt(
             block_index=block_index,
             total_blocks=total_blocks,
             previous_prompts=previous_prompts,
+            visual_tags=visual_tags,
         )
 
     # ── Legacy path ──────────────────────────────────────────────────────────
@@ -734,11 +772,12 @@ def _build_shot_plan_prompt(
     block_index: int,
     total_blocks: int,
     previous_prompts: list[str] | None,
+    visual_tags: list[str] | None = None,
 ) -> str:
     """Build a shot-plan prompt for *scene_text* at position *block_index*."""
-    category = detect_visual_category(topic, scene_text)
+    category = detect_visual_category(topic, scene_text, visual_tags=visual_tags)
     plan = _CATEGORY_PLANS.get(category, _CATEGORY_PLANS[CATEGORY_GENERAL])
-    subject = _extract_subject(scene_text, topic)
+    subject = _extract_subject(scene_text, topic, visual_tags=visual_tags)
     shot_idx = block_index % len(plan)
     shot_type, template = plan[shot_idx]
 
@@ -751,6 +790,7 @@ def _build_shot_plan_prompt(
         detected_visual_category=category,
         shot_type=shot_type,
         subject=subject,
+        visual_tags=visual_tags or [],
         final_visual_prompt=visual_core,
     )
 
@@ -758,14 +798,20 @@ def _build_shot_plan_prompt(
     return f"{prompt} {_ANTI_REPETITION_SUFFIX}"
 
 
-def _extract_subject(scene_text: str, topic: str) -> str:
+def _extract_subject(
+    scene_text: str,
+    topic: str,
+    visual_tags: list[str] | None = None,
+) -> str:
     """Return the visual subject to use in a shot-plan template.
 
     Priority:
     1. *topic* hint when it is a concise phrase (≤ 5 words).
     2. A brief noun phrase extracted from the cleaned scene text.
-    3. *topic* (any length) as a fallback when the text is too short to use.
-    4. ``"abstract cinematic scene"`` as a last resort.
+    3. First *visual_tag* as an additional subject hint when text extraction
+       yields nothing useful.
+    4. *topic* (any length) as a fallback.
+    5. ``"abstract cinematic scene"`` as a last resort.
     """
     stripped_topic = topic.strip()
     if stripped_topic and len(stripped_topic.split()) <= 5 and len(stripped_topic) >= _MIN_SUBJECT_LENGTH:
@@ -779,6 +825,12 @@ def _extract_subject(scene_text: str, topic: str) -> str:
 
     if len(subject) >= _MIN_SUBJECT_LENGTH:
         return subject
+
+    # Try the first visual tag as a subject hint.
+    if visual_tags:
+        tag_subject = visual_tags[0].strip()
+        if len(tag_subject) >= _MIN_SUBJECT_LENGTH:
+            return tag_subject
 
     # Nothing useful extracted from the text; fall back to topic or default.
     if stripped_topic:

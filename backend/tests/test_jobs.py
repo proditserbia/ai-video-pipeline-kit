@@ -481,3 +481,157 @@ async def test_thumbnail_other_user_cannot_access(client, session_factory):
     other_headers = {"Authorization": f"Bearer {other_token}"}
     resp = await client.get(f"/api/v1/jobs/{job_id}/thumbnail", headers=other_headers)
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Topic / Prompt / Visual Tags separation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_job_with_separate_topic_prompt_visual_tags(client, admin_token):
+    """New fields topic, prompt, and visual_tags are stored in input_data."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={
+            "title": "Ancient Rome Video",
+            "topic": "Ancient Rome",
+            "prompt": "Explain daily life in a storytelling tone",
+            "visual_tags": "architecture, marketplace, soldiers",
+            "dry_run": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    job = resp.json()
+    assert job["topic"] == "Ancient Rome"
+    # prompt stored
+    assert job["input_data"]["prompt"] == "Explain daily life in a storytelling tone"
+    # visual_tags normalized to list
+    tags = job["input_data"]["visual_tags"]
+    assert isinstance(tags, list)
+    assert "architecture" in tags
+    assert "marketplace" in tags
+    assert "soldiers" in tags
+
+
+@pytest.mark.asyncio
+async def test_create_job_visual_tags_as_list(client, admin_token):
+    """visual_tags can be provided as a list of strings."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={
+            "title": "Tech Tags Job",
+            "topic": "AI development",
+            "visual_tags": ["robot", "software", "server"],
+            "dry_run": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    tags = resp.json()["input_data"]["visual_tags"]
+    assert set(tags) == {"robot", "software", "server"}
+
+
+@pytest.mark.asyncio
+async def test_create_job_prompt_optional(client, admin_token):
+    """prompt and visual_tags are optional; job created without them is fine."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={"title": "Simple Job", "topic": "jazz music", "dry_run": True},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    job = resp.json()
+    assert job["input_data"]["prompt"] == ""
+    assert job["input_data"]["visual_tags"] == []
+
+
+@pytest.mark.asyncio
+async def test_create_job_no_topic_no_script_still_succeeds(client, admin_token):
+    """A job with neither topic nor script is allowed (pipeline falls back to title).
+    Topic validation is handled by the frontend; the backend remains permissive
+    for backward compatibility."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={"title": "No Topic Job", "dry_run": True},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    # topic and script_text should be empty strings, not crash
+    assert resp.json()["input_data"]["topic"] == ""
+    assert resp.json()["input_data"]["script_text"] == ""
+
+
+@pytest.mark.asyncio
+async def test_create_job_manual_mode_script_only_no_topic_required(client, admin_token):
+    """Manual script mode with script_text but no topic should succeed."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={
+            "title": "Manual Script Job",
+            "script": "This is my narration script for the video.",
+            "dry_run": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_backward_compat_input_data_blob(client, admin_token):
+    """Passing a raw input_data dict (legacy headless format) still works."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={
+            "title": "Legacy Blob Job",
+            "input_data": {
+                "topic": "history of jazz",
+                "script_text": "",
+                "voice": "en-US-AriaNeural",
+                "caption_style": "basic",
+            },
+            "dry_run": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["topic"] == "history of jazz"
+
+
+@pytest.mark.asyncio
+async def test_visual_tags_in_raw_input_data_normalized(client, admin_token):
+    """visual_tags inside a raw input_data blob are also normalised."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    resp = await client.post(
+        "/api/jobs",
+        json={
+            "title": "Raw Tags Job",
+            "input_data": {
+                "topic": "ancient rome",
+                "script_text": "",
+                "voice": "en-US-AriaNeural",
+                "caption_style": "basic",
+                "visual_tags": "Architecture, SOLDIERS",
+            },
+            "dry_run": True,
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    tags = resp.json()["input_data"]["visual_tags"]
+    assert isinstance(tags, list)
+    assert "architecture" in tags
+    assert "soldiers" in tags
