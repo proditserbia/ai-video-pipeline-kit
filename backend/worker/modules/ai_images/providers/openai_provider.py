@@ -16,6 +16,10 @@ logger = structlog.get_logger(__name__)
 class OpenAIImageProvider(AIImageProvider):
     """Generate images via the OpenAI Image API (gpt-image-1)."""
 
+    def __init__(self) -> None:
+        if not settings.OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+
     def generate_image(
         self,
         prompt: str,
