@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     AI_IMAGE_PROVIDER: str = "openai"       # openai | stability | local_mock
     AI_IMAGE_ASPECT_RATIO: str = "9:16"
     AI_IMAGE_ENABLED: bool = False
+    # Negative prompt suffix appended to every AI image prompt to suppress
+    # text, captions, and UI elements from appearing in generated images.
+    AI_IMAGE_NEGATIVE_PROMPT: str = (
+        "No text, no captions, no subtitles, no typography, no logos, "
+        "no signs, no labels, no speech bubbles."
+    )
 
     # Script-to-scene planner (used when AI_IMAGE_ENABLED=true).
     VISUAL_SCENE_MIN_SECONDS: float = 5.0
