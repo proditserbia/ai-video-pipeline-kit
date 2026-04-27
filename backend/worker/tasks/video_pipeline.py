@@ -291,6 +291,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
         _prompt_instructions: str = _resolve_prompt(input_data)
         _visual_tags: list[str] = _resolve_visual_tags(input_data)
 
+        if not _topic:
+            log.warning("pipeline_topic_empty", job_id=job_id)
+
         log.info(
             "pipeline_inputs_resolved",
             topic_resolved=_topic,

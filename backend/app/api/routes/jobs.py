@@ -89,7 +89,7 @@ async def create_job(
             return []
         if isinstance(raw, str):
             raw = raw.split(",")
-        return [t.strip().lower() for t in raw if t.strip()]
+        return [stripped for t in raw if (stripped := str(t).strip().lower())]
 
     # Build input_data from convenience fields when the caller (dashboard form)
     # sends script/topic/voice_name/caption_style instead of a raw input_data blob.

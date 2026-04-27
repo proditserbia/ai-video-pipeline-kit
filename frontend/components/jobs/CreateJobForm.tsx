@@ -145,10 +145,11 @@ export default function CreateJobForm() {
       ) : (
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="topic">Topic <span className="text-red-400">*</span></Label>
+            <Label htmlFor="topic">Topic <span className="text-red-400" aria-hidden="true">*</span></Label>
             <Input
               id="topic"
               placeholder="e.g. Ancient Rome, AI in everyday life, jazz music"
+              aria-required="true"
               {...register('topic')}
             />
             {errors.topic && <p className="text-xs text-red-400">{errors.topic.message}</p>}

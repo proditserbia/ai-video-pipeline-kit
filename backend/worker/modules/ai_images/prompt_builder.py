@@ -814,7 +814,9 @@ def _extract_subject(
     5. ``"abstract cinematic scene"`` as a last resort.
     """
     stripped_topic = topic.strip()
-    if stripped_topic and len(stripped_topic.split()) <= 5 and len(stripped_topic) >= _MIN_SUBJECT_LENGTH:
+    is_concise = bool(stripped_topic) and len(stripped_topic.split()) <= 5
+    is_long_enough = len(stripped_topic) >= _MIN_SUBJECT_LENGTH
+    if is_concise and is_long_enough:
         return stripped_topic
 
     # Extract a subject from the scene text regardless of its raw length.
