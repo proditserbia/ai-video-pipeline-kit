@@ -206,15 +206,38 @@ def run_video_pipeline(self, job_id: str) -> dict:
         script_text: str = _resolve_script_text(input_data)
         if not script_text and flags.is_enabled("ai_scripts"):
             _append_log(db, job, "Generating script via AI")
-            from worker.modules.script_generator.openai_provider import OpenAIScriptProvider
+            from worker.modules.script_generator.openai_provider import (
+                OpenAIRateLimitedError,
+                OpenAIScriptProvider,
+            )
             from worker.modules.script_generator.placeholder_provider import PlaceholderScriptProvider
 
             topic = _resolve_topic(input_data) or job.title
             if settings.OPENAI_API_KEY:
-                provider = OpenAIScriptProvider()
+                try:
+                    result = OpenAIScriptProvider().generate(
+                        topic=topic, config=input_data.get("script_settings", {})
+                    )
+                except OpenAIRateLimitedError:
+                    script_warning = "OpenAI rate limited, fallback script used"
+                    log.warning("openai_script_rate_limited", topic=topic)
+                    logger.warning(
+                        "OpenAI script generation rate limited, using fallback",
+                        topic=topic,
+                    )
+                    _append_log(db, job, "OpenAI script generation rate limited, using fallback")
+                    result = PlaceholderScriptProvider().generate(
+                        topic=topic, config=input_data.get("script_settings", {})
+                    )
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "script_warning": script_warning,
+                    }
+                    db.commit()
             else:
-                provider = PlaceholderScriptProvider()
-            result = provider.generate(topic=topic, config=input_data.get("script_settings", {}))
+                result = PlaceholderScriptProvider().generate(
+                    topic=topic, config=input_data.get("script_settings", {})
+                )
             script_text = result.text
             _append_log(db, job, f"Script generated ({len(script_text)} chars)")
         elif not script_text:
