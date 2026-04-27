@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     # Maximum parallel workers for stock-media downloads and clip preparation.
     PIPELINE_MAX_WORKERS: int = 4
 
+    # AI image generation
+    # MEDIA_MODE controls which media sources are used:
+    #   "stock"  – use Pexels/local only (default)
+    #   "ai"     – use AI image providers only
+    #   "hybrid" – try stock first, fall back to AI
+    MEDIA_MODE: str = "stock"
+    OPENAI_IMAGE_MODEL: str = "gpt-image-1"
+    STABILITY_AI_API_KEY: str | None = None
+    STABILITY_AI_MODEL: str = "stable-diffusion-xl-1024-v1-0"
+
     # Cloud storage (S3-compatible)
     S3_ENDPOINT_URL: str | None = None
     S3_ACCESS_KEY: str | None = None

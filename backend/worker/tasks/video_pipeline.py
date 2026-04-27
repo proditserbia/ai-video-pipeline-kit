@@ -319,8 +319,8 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     or _resolve_topic(input_data)
                     or job.title
                 )
-                log.info("stock_media_query", query=search_query)
-                _append_log(db, job, f"Stock media search query: {search_query!r}")
+                log.info("stock_media_query", query=search_query, media_mode=settings.MEDIA_MODE)
+                _append_log(db, job, f"Stock media search query: {search_query!r} (mode={settings.MEDIA_MODE})")
                 selector = StockMediaSelector()
                 assets, stock_provider = selector.fetch(
                     query=search_query,
@@ -340,9 +340,30 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 if clip_paths:
                     _append_log(db, job, f"Downloaded clips: {', '.join(clip_paths)}")
 
+                # Classify media_source for metadata.
+                _ai_providers = {"openai", "stability"}
+                if stock_provider in _ai_providers:
+                    _media_source = "ai"
+                elif stock_provider == "placeholder":
+                    _media_source = "placeholder"
+                else:
+                    _media_source = "stock"
+
+                # Collect AI-specific metadata (prompts used, provider).
+                _prompts_used = [
+                    a.metadata.get("prompt")
+                    for a in assets
+                    if a.metadata.get("prompt")
+                ]
+                _ai_provider = (
+                    assets[0].metadata.get("ai_provider")
+                    if assets and assets[0].metadata.get("ai_provider")
+                    else None
+                )
+
                 # Determine warning: Pexels was tried but returned nothing, or only placeholders
                 _stock_warn: str | None = None
-                if settings.PEXELS_API_KEY and stock_provider != "pexels":
+                if settings.PEXELS_API_KEY and stock_provider not in {"pexels"} | _ai_providers:
                     _stock_warn = (
                         f"Pexels key is set but Pexels returned no clips; "
                         f"fell back to {stock_provider!r}."
@@ -355,10 +376,15 @@ def run_video_pipeline(self, job_id: str) -> dict:
 
                 _stock_meta: dict = {
                     "stock_provider": stock_provider,
+                    "media_source": _media_source,
                     "stock_query": search_query,
                     "stock_clips": clip_paths,
                     "clip_sources": [a.source for a in assets],
                 }
+                if _ai_provider:
+                    _stock_meta["ai_provider"] = _ai_provider
+                if _prompts_used:
+                    _stock_meta["prompts_used"] = _prompts_used
                 if _stock_warn:
                     _stock_meta["stock_warning"] = _stock_warn
                 job.output_metadata = {**(job.output_metadata or {}), **_stock_meta}
