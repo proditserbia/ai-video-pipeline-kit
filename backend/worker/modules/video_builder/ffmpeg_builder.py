@@ -4,10 +4,14 @@ import math
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from worker.modules.video_builder.visual_segment import VisualSegment
 
 logger = structlog.get_logger(__name__)
 
@@ -296,3 +300,145 @@ class FFmpegVideoBuilder:
             str(output_path),
         ])
         return output_path
+
+    # ── Timeline-aware build path ─────────────────────────────────────────────
+
+    def build_from_segments(
+        self,
+        segments: list[VisualSegment],
+        audio_path: Path | None,
+        srt_path: Path | None,
+        output_path: Path,
+        use_nvenc: bool = False,
+        watermark_path: Path | None = None,
+        bg_music_path: Path | None = None,
+        bg_music_volume: float = 0.15,
+        caption_style: str | None = None,
+    ) -> None:
+        """Build a video from a list of timed :class:`VisualSegment` objects.
+
+        Each segment is converted to an exact-duration clip (still image →
+        static video, or video → trimmed/looped clip), concatenated in
+        timeline order, then muxed with audio, captions, and optional brand
+        assets.  The ``-shortest`` flag ensures the final video matches
+        narration length.
+
+        This method bypasses the fixed 10-second cadence used by
+        :meth:`build`.  No Ken Burns, zoom, or pan effects are applied.
+        """
+        from worker.modules.video_builder.visual_segment import VisualSegment as _VS  # noqa: F401
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not segments:
+            segments = self._placeholder_segments(output_path.parent)
+
+        work_dir = output_path.parent / f"_seg_{output_path.stem}"
+        work_dir.mkdir(exist_ok=True)
+
+        prepared = self._prepare_segments(segments, work_dir)
+        concat_video = self._concatenate_clips(prepared, work_dir)
+        self._compose(
+            video=concat_video,
+            audio_path=audio_path,
+            srt_path=srt_path,
+            output_path=output_path,
+            use_nvenc=use_nvenc,
+            watermark_path=watermark_path,
+            bg_music_path=bg_music_path,
+            bg_music_volume=bg_music_volume,
+            caption_style=caption_style,
+        )
+        logger.info(
+            "video_built_from_segments",
+            output=str(output_path),
+            n_segments=len(segments),
+        )
+
+    def _prepare_segments(
+        self,
+        segments: list[VisualSegment],
+        work_dir: Path,
+    ) -> list[Path]:
+        """Convert each :class:`VisualSegment` to an exact-duration MP4 clip."""
+        prepared: list[Path] = []
+        for i, seg in enumerate(segments):
+            out = work_dir / f"seg_{i:03d}.mp4"
+            # Ensure a positive duration; guard against degenerate inputs.
+            duration = max(seg.duration, 0.1) if seg.duration is not None else 5.0
+            if seg.type == "image":
+                self._image_to_static_clip(seg.path, out, duration)
+            else:
+                self._prepare_video_segment(seg.path, out, duration)
+            prepared.append(out)
+        return prepared
+
+    def _image_to_static_clip(
+        self,
+        image_path: Path,
+        output_path: Path,
+        duration: float,
+    ) -> None:
+        """Convert a still image to a static (no motion) video clip.
+
+        The image is scaled and centre-cropped to 1080×1920.  The clip
+        duration is set exactly to *duration* seconds.  No Ken Burns,
+        zoom, or pan effects are applied.
+        """
+        vf = (
+            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={WIDTH}:{HEIGHT}"
+        )
+        _run([
+            "ffmpeg", "-y",
+            "-loop", "1",
+            "-i", str(image_path),
+            "-t", str(duration),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-crf", "23",
+            "-preset", "fast",
+            "-pix_fmt", "yuv420p",
+            "-an",
+            str(output_path),
+        ])
+
+    def _prepare_video_segment(
+        self,
+        video_path: Path,
+        output_path: Path,
+        duration: float,
+    ) -> None:
+        """Trim (or loop) a video clip to exactly *duration* seconds."""
+        vf = (
+            f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={WIDTH}:{HEIGHT}"
+        )
+        _run([
+            "ffmpeg", "-y",
+            "-stream_loop", "-1",
+            "-i", str(video_path),
+            "-t", str(duration),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-crf", "23",
+            "-preset", "fast",
+            "-pix_fmt", "yuv420p",
+            "-an",
+            str(output_path),
+        ])
+
+    def _placeholder_segments(self, work_dir: Path) -> list[VisualSegment]:
+        """Return a single 10-second placeholder segment when no segments supplied."""
+        from worker.modules.video_builder.visual_segment import VisualSegment
+
+        clips = self._generate_placeholder_clip(work_dir)
+        return [
+            VisualSegment(
+                path=clips[0],
+                start_time=0.0,
+                end_time=10.0,
+                duration=10.0,
+                type="video",
+            )
+        ]

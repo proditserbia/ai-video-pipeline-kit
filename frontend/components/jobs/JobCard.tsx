@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import JobStatusBadge from './JobStatusBadge'
 import JobThumbnail from './JobThumbnail'
+import JobVideoPreview from './JobVideoPreview'
 import { formatRelativeDate } from '@/lib/utils'
 import { useRetryJob, useCancelJob } from '@/hooks/useJobs'
 import type { Job } from '@/types'
@@ -17,16 +18,24 @@ export default function JobCard({ job }: JobCardProps) {
   const retryJob = useRetryJob()
   const cancelJob = useCancelJob()
 
+  const canPreview = job.status === 'completed' && !!job.output_url
+
   return (
     <Card>
       <CardContent className="p-4">
         {job.thumbnail_url && (
-          <div className="mb-3 overflow-hidden rounded-md bg-gray-700">
-            <JobThumbnail
+          <div className="mb-3 rounded-md bg-gray-700">
+            <JobVideoPreview
               jobId={job.id}
-              className="h-32 w-full object-cover"
-              alt={job.title}
-            />
+              enabled={canPreview}
+              className="rounded-md"
+            >
+              <JobThumbnail
+                jobId={job.id}
+                className="h-32 w-full rounded-md object-cover"
+                alt={job.title}
+              />
+            </JobVideoPreview>
           </div>
         )}
         <div className="flex items-start justify-between gap-2">
@@ -73,3 +82,4 @@ export default function JobCard({ job }: JobCardProps) {
     </Card>
   )
 }
+

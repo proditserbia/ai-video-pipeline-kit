@@ -55,6 +55,28 @@ class Settings(BaseSettings):
     # Maximum parallel workers for stock-media downloads and clip preparation.
     PIPELINE_MAX_WORKERS: int = 4
 
+    # AI image generation
+    # MEDIA_MODE controls which media sources are used:
+    #   "stock"  – use Pexels/local only (default)
+    #   "ai"     – use AI image providers only
+    #   "hybrid" – try stock first, fall back to AI
+    MEDIA_MODE: str = "stock"
+    OPENAI_IMAGE_MODEL: str = "gpt-image-1"
+    STABILITY_AI_API_KEY: str | None = None
+    STABILITY_AI_MODEL: str = "stable-diffusion-xl-1024-v1-0"
+
+    # Provider-agnostic AI image generation (new timeline-aware path).
+    # Set AI_IMAGE_ENABLED=true together with MEDIA_MODE=ai to activate the
+    # script-scene-image-timeline pipeline.  Defaults to False so that
+    # existing MEDIA_MODE=ai deployments continue using StockMediaSelector.
+    AI_IMAGE_PROVIDER: str = "openai"       # openai | stability | local_mock
+    AI_IMAGE_ASPECT_RATIO: str = "9:16"
+    AI_IMAGE_ENABLED: bool = False
+
+    # Script-to-scene planner (used when AI_IMAGE_ENABLED=true).
+    VISUAL_SCENE_MIN_SECONDS: float = 5.0
+    VISUAL_SCENE_MAX_SECONDS: float = 8.0
+
     # Cloud storage (S3-compatible)
     S3_ENDPOINT_URL: str | None = None
     S3_ACCESS_KEY: str | None = None
