@@ -112,7 +112,7 @@ class TestGetAIImageProvider:
             patch("app.config.settings.AI_IMAGE_PROVIDER", "openai"),
             patch("app.config.settings.OPENAI_API_KEY", None),
         ):
-            with pytest.raises(RuntimeError, match="not available"):
+            with pytest.raises(RuntimeError, match="OPENAI_API_KEY is not set"):
                 get_ai_image_provider()
 
     def test_openai_available_when_key_set(self):

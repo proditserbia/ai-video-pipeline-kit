@@ -385,6 +385,17 @@ def run_video_pipeline(self, job_id: str) -> dict:
                                     "end_time": scene.end_time,
                                     "duration": scene.duration,
                                 })
+                                log.info(
+                                    "ai_image_scene_generated",
+                                    index=scene.index,
+                                    text=scene.text,
+                                    prompt=scene.image_prompt,
+                                    provider=generated.provider,
+                                    image_path=str(generated.path),
+                                    start_time=scene.start_time,
+                                    end_time=scene.end_time,
+                                    duration=scene.duration,
+                                )
                             except Exception as img_exc:
                                 _warn = f"AI image failed for scene {scene.index}: {img_exc}"
                                 _warnings.append(_warn)

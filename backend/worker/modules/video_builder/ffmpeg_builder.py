@@ -365,6 +365,13 @@ class FFmpegVideoBuilder:
         for i, seg in enumerate(segments):
             out = work_dir / f"seg_{i:03d}.mp4"
             # Ensure a positive duration; guard against degenerate inputs.
+            if seg.duration is not None and seg.duration <= 0:
+                logger.warning(
+                    "segment_invalid_duration",
+                    index=i,
+                    duration=seg.duration,
+                    path=str(seg.path),
+                )
             duration = max(seg.duration, 0.1) if seg.duration is not None else 5.0
             if seg.type == "image":
                 self._image_to_static_clip(seg.path, out, duration)
