@@ -723,6 +723,17 @@ def _filter_generic_tags(
     return specific, generic
 
 
+def _join_specific_tags(specific_tags: list[str]) -> str:
+    """Combine up to two specific tags into a subject phrase.
+
+    ``["groundhog"]`` → ``"groundhog"``
+    ``["jazz", "saxophone"]`` → ``"jazz saxophone"``
+    """
+    if len(specific_tags) == 1:
+        return specific_tags[0]
+    return " ".join(specific_tags[:2])
+
+
 def resolve_visual_subject(
     topic: str,
     visual_tags: list[str] | None = None,
@@ -767,8 +778,7 @@ def resolve_visual_subject(
     # 1. Specific visual_tags win when topic is generic or absent — this is
     #    the core grounding fix: "animals" + ["groundhog"] → "groundhog".
     if specific_tags and (topic_is_generic or not stripped_topic):
-        subject = specific_tags[0] if len(specific_tags) == 1 else " ".join(specific_tags[:2])
-        return subject, "visual_tags"
+        return _join_specific_tags(specific_tags), "visual_tags"
 
     # 2. Topic when concise and specific (not a broad category label).
     topic_words = stripped_topic.split()
@@ -779,8 +789,7 @@ def resolve_visual_subject(
 
     # 3. Specific visual_tags as secondary option when topic is long.
     if specific_tags:
-        subject = specific_tags[0] if len(specific_tags) == 1 else " ".join(specific_tags[:2])
-        return subject, "visual_tags"
+        return _join_specific_tags(specific_tags), "visual_tags"
 
     # 4. Extract a noun phrase from block_text.
     if block_text:

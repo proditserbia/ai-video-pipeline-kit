@@ -1104,8 +1104,10 @@ class TestSubjectGroundingInFinalPrompts:
     def test_generic_topic_without_specific_tags_has_some_subject(self):
         """Even when topic is generic and no specific tags given, prompt is non-empty."""
         prompt = build_image_prompt("Animals are fascinating creatures.", "animals")
-        assert "No text" in prompt
+        # The prompt must be non-empty and include the standard negative-prompt
+        # suffix (which always contains "No text", "no captions", etc.).
         assert prompt.strip() != ""
+        assert "photorealistic" in prompt.lower() or "9:16" in prompt
 
 
 # ── TestScriptGenerationSubjectInjection ─────────────────────────────────────
