@@ -402,7 +402,8 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     from worker.modules.video_builder.visual_segment import VisualSegment
 
                     # Split script into semantic blocks (one TTS + one image each).
-                    blocks = plan_narration_blocks(script_text)
+                    _topic = _resolve_topic(input_data) or (job.title or "")
+                    blocks = plan_narration_blocks(script_text, topic=_topic)
                     _append_log(db, job, f"Narration blocks planned: {len(blocks)}")
 
                     # Instantiate the configured AI image provider once.

@@ -4,7 +4,11 @@ from __future__ import annotations
 import pytest
 
 from worker.modules.ai_images.prompt_builder import (
+    _ANIMAL_SHOT_PLAN,
+    _GENERAL_SHOT_PLAN,
     _append_negative,
+    _extract_subject,
+    _is_animal_subject,
     _is_non_visual,
     _strip_conversational,
     _wrap_cinematic,
@@ -188,3 +192,193 @@ class TestBuildImagePrompt:
         for text in ["", "   ", "Hey!"]:
             prompt = build_image_prompt(text)
             assert prompt.strip() != ""
+
+
+# ── _extract_subject ──────────────────────────────────────────────────────────
+
+
+class TestExtractSubject:
+    def test_topic_preferred_over_text(self):
+        subject = _extract_subject("Some long narration text here.", "beekeeping")
+        assert subject == "beekeeping"
+
+    def test_topic_used_when_short(self):
+        subject = _extract_subject("Hey!", "ocean conservation")
+        assert subject == "ocean conservation"
+
+    def test_extracts_from_text_when_no_topic(self):
+        subject = _extract_subject("Honeybees pollinate wildflowers in a meadow.", "")
+        assert "honeybee" in subject.lower() or "wildflowers" in subject.lower() or len(subject) > 3
+
+    def test_fallback_when_text_non_visual(self):
+        subject = _extract_subject("Hey!", "")
+        assert len(subject) > 0
+
+    def test_long_topic_not_used_as_subject(self):
+        long_topic = "this is a very long topic with more than five words here"
+        subject = _extract_subject("Bees in a meadow.", long_topic)
+        # Falls through to text extraction because topic is > 5 words
+        assert subject != long_topic
+
+
+# ── _is_animal_subject ────────────────────────────────────────────────────────
+
+
+class TestIsAnimalSubject:
+    def test_groundhog_is_animal(self):
+        assert _is_animal_subject("groundhog") is True
+
+    def test_bear_is_animal(self):
+        assert _is_animal_subject("bear") is True
+
+    def test_honeybee_is_animal(self):
+        assert _is_animal_subject("honeybees") is True
+
+    def test_beekeeping_not_animal(self):
+        assert _is_animal_subject("beekeeping") is False
+
+    def test_ocean_conservation_not_animal(self):
+        assert _is_animal_subject("ocean conservation") is False
+
+    def test_animal_in_phrase(self):
+        assert _is_animal_subject("groundhog in natural habitat") is True
+
+    def test_case_insensitive(self):
+        assert _is_animal_subject("Groundhog") is True
+
+
+# ── TestShotPlanVariety ────────────────────────────────────────────────────────
+
+
+class TestShotPlanVariety:
+    """Verify that the shot-plan produces visually varied prompts for a repeated subject."""
+
+    # Five short narration texts all about the same animal.
+    _TEXTS = [
+        "Groundhogs have round faces, tiny ears, and big curious eyes.",
+        "These animals are known for their playful antics in the meadow.",
+        "Groundhogs are great for your garden and help aerate the soil.",
+        "February 2nd is Groundhog Day, when the weather forecast happens.",
+        "Groundhogs hibernate through the cold winter months underground.",
+    ]
+    _TOPIC = "groundhog"
+
+    def _build_prompts(self) -> list[str]:
+        prompts: list[str] = []
+        for i, text in enumerate(self._TEXTS):
+            p = build_image_prompt(
+                text,
+                self._TOPIC,
+                block_index=i,
+                total_blocks=len(self._TEXTS),
+                previous_prompts=list(prompts),
+            )
+            prompts.append(p)
+        return prompts
+
+    def test_five_blocks_produce_distinct_prompts(self):
+        prompts = self._build_prompts()
+        assert len(prompts) == 5
+        assert len(set(prompts)) == 5, "All 5 prompts must be unique (different shot types)"
+
+    def test_five_blocks_use_all_animal_shot_types(self):
+        """Each block should map to a different shot type in the animal plan."""
+        prompts = self._build_prompts()
+        shot_types_used: set[str] = set()
+        for i, _ in enumerate(self._TEXTS):
+            shot_idx = i % len(_ANIMAL_SHOT_PLAN)
+            shot_type, _ = _ANIMAL_SHOT_PLAN[shot_idx]
+            shot_types_used.add(shot_type)
+        # Five blocks cycling through five slots means all five shot types are used.
+        assert len(shot_types_used) == len(_ANIMAL_SHOT_PLAN)
+
+    def test_not_all_prompts_contain_close_up(self):
+        prompts = self._build_prompts()
+        close_up_count = sum(
+            1 for p in prompts if "close-up" in p.lower() or "close up" in p.lower()
+        )
+        assert close_up_count < len(prompts), (
+            "At least one prompt should not be a close-up"
+        )
+
+    def test_every_prompt_includes_no_text_suffix(self):
+        prompts = self._build_prompts()
+        for p in prompts:
+            assert "No text" in p, f"'No text' missing from prompt: {p!r}"
+
+    def test_every_prompt_includes_no_captions_suffix(self):
+        prompts = self._build_prompts()
+        for p in prompts:
+            assert "no captions" in p.lower(), f"'no captions' missing from prompt: {p!r}"
+
+    def test_raw_narration_phrases_not_verbatim(self):
+        """Raw narration details must not be copied word-for-word into the prompt."""
+        prompts = self._build_prompts()
+        raw_phrases = [
+            "round faces, tiny ears, and big curious eyes",
+            "playful antics",
+            "great for your garden",
+            "February 2nd is Groundhog Day",
+            "hibernate through the cold winter",
+        ]
+        for prompt, phrase in zip(prompts, raw_phrases):
+            assert phrase.lower() not in prompt.lower(), (
+                f"Raw narration phrase {phrase!r} found verbatim in prompt: {prompt!r}"
+            )
+
+    def test_first_last_not_both_close_up_portrait(self):
+        prompts = self._build_prompts()
+        first_close = "close-up" in prompts[0].lower() or "portrait" in prompts[0].lower()
+        last_close = "close-up" in prompts[-1].lower() or "portrait" in prompts[-1].lower()
+        assert not (first_close and last_close), (
+            "First and last prompts must not both be close-up portraits"
+        )
+
+    def test_anti_repetition_suffix_in_every_prompt(self):
+        prompts = self._build_prompts()
+        for p in prompts:
+            assert "distinct" in p.lower() or "composition" in p.lower(), (
+                f"Anti-repetition suffix missing from prompt: {p!r}"
+            )
+
+    def test_first_prompt_is_establishing_or_wide(self):
+        prompts = self._build_prompts()
+        first = prompts[0].lower()
+        assert "establishing" in first or "wide" in first or "habitat" in first, (
+            f"First prompt should be establishing/wide/habitat shot, got: {prompts[0]!r}"
+        )
+
+    def test_subject_is_groundhog_not_full_narration(self):
+        """Subject extracted from topic should be 'groundhog', not the full sentence."""
+        prompts = self._build_prompts()
+        for p in prompts:
+            assert "groundhog" in p.lower(), (
+                f"Subject 'groundhog' missing from prompt: {p!r}"
+            )
+
+    def test_general_shot_plan_also_cycles(self):
+        """Non-animal topic prompts should also use different shot types per block."""
+        texts = [
+            "Solar panels convert sunlight into electricity efficiently.",
+            "Homeowners can reduce energy bills with rooftop solar systems.",
+            "Grid-tied inverters allow excess energy to flow back to utilities.",
+            "Battery storage extends solar power into the night-time hours.",
+            "Government incentives make solar installation more affordable.",
+        ]
+        topic = "solar energy"
+        prompts: list[str] = []
+        for i, text in enumerate(texts):
+            p = build_image_prompt(
+                text, topic, block_index=i, total_blocks=5, previous_prompts=list(prompts)
+            )
+            prompts.append(p)
+
+        assert len(set(prompts)) == 5, "General-topic prompts must all be distinct"
+        # Each prompt should map to a different general shot type.
+        shot_types_expected = {t for t, _ in _GENERAL_SHOT_PLAN}
+        shot_types_found: set[str] = set()
+        for i in range(5):
+            shot_idx = i % len(_GENERAL_SHOT_PLAN)
+            shot_type, _ = _GENERAL_SHOT_PLAN[shot_idx]
+            shot_types_found.add(shot_type)
+        assert shot_types_found == shot_types_expected

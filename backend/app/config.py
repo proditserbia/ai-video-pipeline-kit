@@ -78,6 +78,10 @@ class Settings(BaseSettings):
         "No text, no captions, no subtitles, no typography, no logos, "
         "no signs, no labels, no speech bubbles."
     )
+    # When True, use the shot-plan system to produce visually varied prompts
+    # across blocks (different framing, composition, and shot type per block).
+    # Defaults to True for AI image mode.
+    VISUAL_SHOT_PLAN_ENABLED: bool = True
 
     # Script-to-scene planner (used when AI_IMAGE_ENABLED=true).
     VISUAL_SCENE_MIN_SECONDS: float = 5.0

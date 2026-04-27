@@ -76,6 +76,7 @@ def plan_script_scenes(
     audio_duration: float | None = None,
     min_seconds: float | None = None,
     max_seconds: float | None = None,
+    topic: str = "",
 ) -> list[ScriptScene]:
     """Convert a narration script into a list of timed :class:`ScriptScene` objects.
 
@@ -127,7 +128,7 @@ def plan_script_scenes(
     chunks = _group_sentences(sentences, n_scenes)
 
     # Build scenes, assigning proportional timings when audio_duration is known.
-    scenes = _build_scenes(chunks, audio_duration)
+    scenes = _build_scenes(chunks, audio_duration, topic=topic)
     logger.info(
         "script_scenes_planned",
         n_scenes=len(scenes),
@@ -161,7 +162,14 @@ def _group_sentences(sentences: list[str], n_groups: int) -> list[str]:
     return chunks
 
 
-def _make_image_prompt(text: str) -> str:
+def _make_image_prompt(
+    text: str,
+    topic: str = "",
+    *,
+    block_index: int = 0,
+    total_blocks: int = 1,
+    previous_prompts: list[str] | None = None,
+) -> str:
     """Convert a scene text chunk into a focused visual image prompt.
 
     Delegates to :func:`~worker.modules.ai_images.prompt_builder.build_image_prompt`
@@ -169,7 +177,13 @@ def _make_image_prompt(text: str) -> str:
     appends the configured negative-prompt suffix so that image models never
     render on-screen text, captions, or speech bubbles.
     """
-    return build_image_prompt(text)
+    return build_image_prompt(
+        text,
+        topic,
+        block_index=block_index,
+        total_blocks=total_blocks,
+        previous_prompts=previous_prompts,
+    )
 
 
 def _make_search_query(text: str) -> str:
@@ -182,11 +196,14 @@ def _make_search_query(text: str) -> str:
 def _build_scenes(
     chunks: list[str],
     audio_duration: float | None,
+    topic: str = "",
 ) -> list[ScriptScene]:
     """Construct :class:`ScriptScene` objects with optional proportional timing."""
     total_chars = sum(len(c) for c in chunks) or len(chunks)  # guard zero
     timed = audio_duration is not None and audio_duration > 0
 
+    total = len(chunks)
+    previous_prompts: list[str] = []
     scenes: list[ScriptScene] = []
     cursor = 0.0
     for i, text in enumerate(chunks):
@@ -204,12 +221,21 @@ def _build_scenes(
         else:
             start = end_t = dur_t = None
 
+        prompt = _make_image_prompt(
+            text,
+            topic,
+            block_index=i,
+            total_blocks=total,
+            previous_prompts=previous_prompts,
+        )
+        previous_prompts.append(prompt)
+
         scenes.append(
             ScriptScene(
                 id=str(uuid.uuid4()),
                 index=i,
                 text=text,
-                image_prompt=_make_image_prompt(text),
+                image_prompt=prompt,
                 search_query=_make_search_query(text),
                 start_time=start,
                 end_time=end_t,
@@ -299,7 +325,7 @@ def _merge_short_blocks(blocks: list[str]) -> list[str]:
     return result
 
 
-def plan_narration_blocks(script_text: str) -> list[NarrationBlock]:
+def plan_narration_blocks(script_text: str, topic: str = "") -> list[NarrationBlock]:
     """Split *script_text* into semantic :class:`NarrationBlock` objects.
 
     **Splitting strategy**:
@@ -314,6 +340,8 @@ def plan_narration_blocks(script_text: str) -> list[NarrationBlock]:
 
     Args:
         script_text: Full narration text (may be empty).
+        topic:       Optional global topic / title used by the shot-plan
+                     system to build visually varied prompts.
 
     Returns:
         Ordered list of :class:`NarrationBlock` objects (at least one).
@@ -335,14 +363,24 @@ def plan_narration_blocks(script_text: str) -> list[NarrationBlock]:
     if not paragraphs:
         paragraphs = [_DEFAULT_NARRATION_TEXT]
 
+    total = len(paragraphs)
+    previous_prompts: list[str] = []
     blocks: list[NarrationBlock] = []
     for i, text in enumerate(paragraphs):
+        prompt = _make_image_prompt(
+            text,
+            topic,
+            block_index=i,
+            total_blocks=total,
+            previous_prompts=previous_prompts,
+        )
+        previous_prompts.append(prompt)
         blocks.append(
             NarrationBlock(
                 id=str(uuid.uuid4()),
                 index=i,
                 text=text,
-                image_prompt=_make_image_prompt(text),
+                image_prompt=prompt,
             )
         )
 
