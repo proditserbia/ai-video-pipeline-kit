@@ -61,6 +61,36 @@ def _resolve_topic(input_data: dict) -> str:
     return ""
 
 
+def _resolve_prompt(input_data: dict) -> str:
+    """Extract script generation instructions / prompt from input_data.
+
+    The ``prompt`` key holds additional guidance (tone, audience, angle) that
+    is passed to the script generator.  It is intentionally separate from
+    ``topic`` so that visual planning always uses the topic, not the instructions.
+    """
+    return input_data.get("prompt", "") or ""
+
+
+def _normalize_visual_tags(raw) -> list[str]:
+    """Return a clean list of lowercase visual tag strings.
+
+    Accepts:
+    - A comma-separated string: ``"architecture, soldiers, market"``
+    - A list of strings: ``["architecture", "soldiers"]``
+    - ``None`` / empty → ``[]``
+    """
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    return [t.strip().lower() for t in raw if str(t).strip()]
+
+
+def _resolve_visual_tags(input_data: dict) -> list[str]:
+    """Extract and normalise visual_tags from input_data."""
+    return _normalize_visual_tags(input_data.get("visual_tags"))
+
+
 def _resolve_voice(input_data: dict) -> str:
     """Extract voice ID from either flat or nested input_data."""
     voice = input_data.get("voice", "en-US-AriaNeural")
@@ -256,6 +286,27 @@ def run_video_pipeline(self, job_id: str) -> dict:
         work_dir = Path(settings.STORAGE_PATH) / "temp" / job_id
         work_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve the structured input fields once and log them.
+        _topic: str = _resolve_topic(input_data) or job.title or ""
+        _prompt_instructions: str = _resolve_prompt(input_data)
+        _visual_tags: list[str] = _resolve_visual_tags(input_data)
+
+        if not _topic:
+            log.warning("pipeline_topic_empty", job_id=job_id)
+
+        log.info(
+            "pipeline_inputs_resolved",
+            topic_resolved=_topic,
+            prompt_instructions_present=bool(_prompt_instructions),
+            visual_tags_resolved=_visual_tags,
+        )
+        _append_log(
+            db, job,
+            f"Inputs: topic={_topic!r} "
+            f"prompt_present={bool(_prompt_instructions)} "
+            f"visual_tags={_visual_tags}",
+        )
+
         # ── Step 3: Script ─────────────────────────────────────────────
         script_text: str = _resolve_script_text(input_data)
         if not script_text and flags.is_enabled("ai_scripts"):
@@ -266,11 +317,15 @@ def run_video_pipeline(self, job_id: str) -> dict:
             )
             from worker.modules.script_generator.placeholder_provider import PlaceholderScriptProvider
 
-            topic = _resolve_topic(input_data) or job.title
+            topic = _topic
+            # Merge prompt/instructions into script_settings so providers can use them.
+            _script_cfg: dict = {**input_data.get("script_settings", {})}
+            if _prompt_instructions:
+                _script_cfg["instructions"] = _prompt_instructions
             if settings.OPENAI_API_KEY:
                 try:
                     result = OpenAIScriptProvider().generate(
-                        topic=topic, config=input_data.get("script_settings", {})
+                        topic=topic, config=_script_cfg
                     )
                 except OpenAIRateLimitedError:
                     script_warning = "OpenAI rate limited, fallback script used"
@@ -281,7 +336,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     )
                     _append_log(db, job, "OpenAI script generation rate limited, using fallback")
                     result = PlaceholderScriptProvider().generate(
-                        topic=topic, config=input_data.get("script_settings", {})
+                        topic=topic, config=_script_cfg
                     )
                     job.output_metadata = {
                         **(job.output_metadata or {}),
@@ -290,7 +345,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     db.commit()
             else:
                 result = PlaceholderScriptProvider().generate(
-                    topic=topic, config=input_data.get("script_settings", {})
+                    topic=topic, config=_script_cfg
                 )
             script_text = result.text
             _append_log(db, job, f"Script generated ({len(script_text)} chars)")
@@ -402,7 +457,10 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     from worker.modules.video_builder.visual_segment import VisualSegment
 
                     # Split script into semantic blocks (one TTS + one image each).
-                    blocks = plan_narration_blocks(script_text)
+                    # Use the already-resolved _topic and _visual_tags.
+                    blocks = plan_narration_blocks(
+                        script_text, topic=_topic, visual_tags=_visual_tags
+                    )
                     _append_log(db, job, f"Narration blocks planned: {len(blocks)}")
 
                     # Instantiate the configured AI image provider once.

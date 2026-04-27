@@ -70,6 +70,10 @@ export interface Job {
   caption_style?: string | null
   script?: string | null
   topic?: string | null
+  /** Script generation instructions (separate from topic). */
+  prompt?: string | null
+  /** Visual planning tags resolved from input_data. */
+  visual_tags?: string[] | null
   // TTS outcome fields derived from output_metadata by the backend
   tts_status?: 'success' | 'skipped' | 'failed' | null
   tts_warning?: string | null
@@ -124,6 +128,10 @@ export interface CreateJobRequest {
   title: string
   script?: string
   topic?: string
+  /** Script generation guidance: tone, audience, angle, etc. Separate from topic. */
+  prompt?: string
+  /** Comma-separated visual tags or array (e.g. "architecture, soldiers"). */
+  visual_tags?: string | string[]
   voice_name: string
   caption_style: CaptionStyle
   dry_run: boolean

@@ -33,11 +33,22 @@ class OpenAIScriptProvider(AbstractScriptProvider):
         model = cfg.get("model", "gpt-4o-mini")
         max_tokens = int(cfg.get("max_tokens", 512))
 
+        # Build user message: always include topic; append instructions when present.
+        instructions = cfg.get("instructions", "").strip()
+        if instructions:
+            user_message = (
+                f"Topic: {topic}\n\n"
+                f"Instructions: {instructions}\n\n"
+                "Generate a short narration script for a vertical social video."
+            )
+        else:
+            user_message = f"Topic: {topic}"
+
         payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Topic: {topic}"},
+                {"role": "user", "content": user_message},
             ],
             "max_tokens": max_tokens,
         }

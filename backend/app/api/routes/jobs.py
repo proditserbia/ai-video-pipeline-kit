@@ -62,7 +62,9 @@ async def list_jobs(
         count_query = count_query.where(Job.project_id == project_id)
 
     total = (await db.execute(count_query)).scalar_one()
-    jobs_result = await db.execute(query.offset((page - 1) * size).limit(size))
+    jobs_result = await db.execute(
+        query.order_by(Job.created_at.desc()).offset((page - 1) * size).limit(size)
+    )
     jobs = jobs_result.scalars().all()
 
     return JobListResponse(
@@ -82,17 +84,31 @@ async def create_job(
 ) -> JobResponse:
     from app.config import settings as app_settings
 
+    # Normalise visual_tags to list[str] regardless of whether the caller
+    # sends a comma-separated string or an already-parsed list.
+    def _normalise_tags(raw) -> list[str]:
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        return [stripped for t in raw if (stripped := str(t).strip().lower())]
+
     # Build input_data from convenience fields when the caller (dashboard form)
     # sends script/topic/voice_name/caption_style instead of a raw input_data blob.
     if body.input_data is None:
         input_data: dict = {
             "script_text": body.script or "",
             "topic": body.topic or "",
+            "prompt": body.prompt or "",
+            "visual_tags": _normalise_tags(body.visual_tags),
             "voice": body.voice_name,
             "caption_style": body.caption_style,
         }
     else:
         input_data = body.input_data
+        # Normalise visual_tags inside raw input_data blobs too.
+        if "visual_tags" in input_data:
+            input_data["visual_tags"] = _normalise_tags(input_data["visual_tags"])
 
     job = Job(
         id=str(uuid.uuid4()),
@@ -223,6 +239,25 @@ async def retry_job(
         )
 
     return JobResponse.model_validate(job)
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    job = await _get_job_or_404(job_id, current_user.id, db)
+
+    active_statuses = {JobStatus.processing, JobStatus.rendering, JobStatus.uploading}
+    if job.status in active_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a job while it is processing",
+        )
+
+    await db.delete(job)
+    await db.commit()
 
 
 @router.get("/{job_id}/logs")

@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
-import { useJobs, useRetryJob, useCancelJob } from '@/hooks/useJobs'
+import { useJobs, useRetryJob, useCancelJob, useDeleteJob } from '@/hooks/useJobs'
 import { useProjects } from '@/hooks/useProjects'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
 import ResultQualityBadge from '@/components/jobs/ResultQualityBadge'
@@ -11,15 +11,18 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatRelativeDate } from '@/lib/utils'
-import type { JobStatus } from '@/types'
-import { Plus, RefreshCw, XCircle, Eye } from 'lucide-react'
+import type { Job, JobStatus } from '@/types'
+import { Plus, RefreshCw, XCircle, Eye, Trash2 } from 'lucide-react'
 
 export default function JobsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [projectFilter, setProjectFilter] = useState<string>('')
   const [page, setPage] = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState<Job | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const { data: jobs, isLoading, error, refetch } = useJobs({
     status: statusFilter as JobStatus || undefined,
@@ -30,6 +33,21 @@ export default function JobsPage() {
   const { data: projects } = useProjects()
   const retryJob = useRetryJob()
   const cancelJob = useCancelJob()
+  const deleteJob = useDeleteJob()
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return
+    setDeleteError(null)
+    try {
+      await deleteJob.mutateAsync(deleteTarget.id)
+      setDeleteTarget(null)
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        'Failed to delete job'
+      setDeleteError(msg)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -149,6 +167,15 @@ export default function JobsPage() {
                               <XCircle className="h-4 w-4" />
                             </Button>
                           )}
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => { setDeleteError(null); setDeleteTarget(job) }}
+                            disabled={job.status === 'processing' || job.status === 'rendering' || job.status === 'uploading'}
+                            title="Delete job"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -183,6 +210,35 @@ export default function JobsPage() {
           )}
         </>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Job</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this job?
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <Alert variant="destructive" className="mt-2">
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteConfirm}
+              isLoading={deleteJob.isPending}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
