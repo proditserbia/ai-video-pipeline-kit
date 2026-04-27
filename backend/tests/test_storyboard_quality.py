@@ -133,20 +133,42 @@ class TestGoodSceneGetsHighScore:
     def test_different_from_previous_adds_bonus(self):
         prev = _make_scene(
             index=0,
-            visual_description="Wide shot of festival square with crowd",
-            context_terms=["festival"],
+            visual_description=(
+                "Wide shot of festival square with crowd cheering at winter event, "
+                "groundhog visible on stage"
+            ),
+            context_terms=["festival", "crowd"],
+            visual_tags_used=["festival"],
         )
-        current = _make_scene(
+        # A scene clearly different from prev — equally rich but varied.
+        different = _make_scene(
             index=1,
-            visual_description="Close-up of groundhog emerging from burrow on stage",
-            context_terms=["ceremony"],
+            visual_description=(
+                "Medium shot of handlers lifting groundhog at ceremony stage, "
+                "audience gathered around in winter clothes"
+            ),
+            context_terms=["ceremony", "crowd"],
+            visual_tags_used=["ceremony"],
         )
-        score_with_prev = score_scene(current, previous_scene=prev)
-        score_without_prev = score_scene(current, previous_scene=None)
-        # Both should pass — score_with_prev may be equal (variety bonus already
-        # applied in both cases when scenes differ).
-        assert score_with_prev >= 0
-        assert score_without_prev >= 0
+        # A scene that is nearly identical to prev — same richness, no variety.
+        similar = _make_scene(
+            index=1,
+            visual_description=(
+                "Wide shot of festival square with crowd cheering at winter event, "
+                "groundhog visible on stage"
+            ),
+            context_terms=["festival", "crowd"],
+            visual_tags_used=["festival"],
+        )
+        score_different = score_scene(different, previous_scene=prev)
+        score_similar = score_scene(similar, previous_scene=prev)
+        # The different scene should score higher than the similar one because
+        # it receives the +15 variety bonus while the similar one gets the -15
+        # repetition penalty.
+        assert score_different > score_similar, (
+            f"Expected different scene ({score_different}) to outscore "
+            f"similar scene ({score_similar})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +182,7 @@ class TestRewriteImprovesScore:
         "stage at dawn in a snowy town square, festival atmosphere"
     )
 
-    def _mock_rewrite(self, scene: StoryboardScene) -> StoryboardScene:
+    def _mock_rewrite(self, scene: StoryboardScene, *args, **kwargs) -> StoryboardScene:
         """Simulate a successful LLM rewrite by returning an improved scene."""
         return dataclasses.replace(
             scene,

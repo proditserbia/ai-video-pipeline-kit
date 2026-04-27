@@ -89,6 +89,9 @@ _STOP_WORDS: frozenset[str] = frozenset(
 # Minimum word count to be considered "visually specific".
 _MIN_SPECIFIC_WORDS: int = 10
 
+# Minimum word count for a valid LLM rewrite response (sanity check).
+_MIN_REWRITE_RESPONSE_WORDS: int = 5
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -241,7 +244,7 @@ def rewrite_scene(
         return scene
 
     new_desc = (raw.get("visual_description") or "").strip()
-    if not new_desc or len(new_desc.split()) < 5:
+    if not new_desc or len(new_desc.split()) < _MIN_REWRITE_RESPONSE_WORDS:
         logger.warning(
             "scene_rewrite_invalid_response",
             block_index=scene.index,
@@ -249,17 +252,20 @@ def rewrite_scene(
         )
         return scene
 
-    # Strip negative-prompt leakage from the LLM output.
+    # Strip negative-prompt leakage from the LLM output.  Use a word-boundary
+    # aware pattern so we don't leave orphaned fragments.
     new_desc = re.sub(
-        r"(?i)(no text|no captions|no subtitles|no typography|no logos|"
-        r"no signs|no labels|no speech bubbles|no readable)[^.]*\.?\s*",
+        r"(?i)\b(no text|no captions|no subtitles|no typography|no logos|"
+        r"no signs|no labels|no speech bubbles|no readable)\b[^,;.]*[,;.]?\s*",
         "",
         new_desc,
-    ).strip()
+    ).strip().rstrip(",;")
 
-    # Ensure the subject is still present.
+    # Ensure the subject is still present.  Append naturally only when the
+    # description does not already end with punctuation.
     if scene.subject and scene.subject.lower() not in new_desc.lower():
-        new_desc = f"{new_desc}, {scene.subject}"
+        separator = " " if new_desc.endswith((".", "!", "?")) else ", "
+        new_desc = f"{new_desc}{separator}{scene.subject}"
 
     new_prompt = _assemble_image_prompt(new_desc, scene.negative_prompt)
     context_terms = list(raw.get("context_terms") or scene.context_terms)
@@ -327,10 +333,8 @@ def validate_and_improve_storyboard(
         best = scene
         best_score = initial_score
         rewritten = False
-        attempts_made = 0
 
         for attempt in range(1, max_retries + 1):
-            attempts_made = attempt
             candidate = rewrite_scene(best, topic, visual_tags, full_script)
             candidate_score = score_scene(candidate, previous)
 
@@ -350,6 +354,10 @@ def validate_and_improve_storyboard(
 
             if best_score >= threshold and not is_generic_scene(best):
                 break
+
+        # `attempt` holds the last loop iteration index (loop always runs at
+        # least once when we reach this point).
+        attempts_made = attempt  # noqa: F821 — always set when loop ran
 
         if best_score < threshold or is_generic_scene(best):
             logger.warning(
