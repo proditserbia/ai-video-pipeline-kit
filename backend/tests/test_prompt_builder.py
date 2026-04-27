@@ -1537,7 +1537,7 @@ class TestUltraShortBlockMerge:
         assert result == blocks
 
     def test_all_short_blocks_get_merged(self):
-        """If two consecutive blocks are short, they both merge with the next long one."""
+        """Short leading blocks merge into the next long block."""
         from worker.modules.script_planner.planner import _merge_ultra_short_text_blocks
 
         short1 = "Hey there!"  # 2 words
@@ -1546,7 +1546,7 @@ class TestUltraShortBlockMerge:
             "Thousands of people gather every year in Punxsutawney "
             "for the famous Groundhog Day celebration."
         )
-        # short1 is too short → stays pending → merges with short2 → still short → merges with long
+        # short1 is too short → merges with short2; combined still too short → merges with long
         result = _merge_ultra_short_text_blocks([short1, short2, long_block])
         # The result must not contain short1 or short2 as standalone entries.
         assert all(

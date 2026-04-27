@@ -344,7 +344,8 @@ def _compute_min_block_words() -> int:
     Assumes an average speaking rate of ~130 words per minute.  A block with
     fewer words than this threshold is too short to justify its own image slot.
     """
-    # 130 wpm → ~2.17 words/sec.  Use 7 words ≈ 3 seconds as the floor.
+    # 130 wpm → ~2.17 words/sec.  Minimum floor is 5 words to avoid
+    # over-merging on slow speech.
     words_per_second = 130.0 / 60.0
     return max(5, int(settings.MIN_VISUAL_BLOCK_SECONDS * words_per_second))
 

@@ -227,10 +227,11 @@ def _plan_with_openai(
         )
         return briefs
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "ai_visual_planner_failed",
             error=str(exc),
             provider="openai",
+            exc_info=True,
         )
         return None

@@ -976,7 +976,7 @@ def extract_visual_context(
     # --- Weather / prediction context ---
     ctx["has_weather"] = bool(
         re.search(
-            r"\b(shadow|predict|forecast|weather|temperature|shadow)\b",
+            r"\b(shadow|predict|forecast|weather|temperature)\b",
             block_lower,
         )
     )
@@ -1044,7 +1044,7 @@ def _build_context_aware_prompt(
     # --- Build scene setting descriptor ---
     event_name = named_events[0] if named_events else None
 
-    if event_name and event_type and event_name.lower() != event_type.lower():
+    if event_name and event_type and event_name.lower() not in event_type.lower() and event_type.lower() not in event_name.lower():
         scene_setting = f"{event_name} {event_type}"
     elif event_name:
         scene_setting = event_name
