@@ -96,7 +96,7 @@ class OpenAIImageProvider(AIImageProvider):
                 )
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            body = exc.response.text[:2000] if exc.response is not None else ""
+            body = exc.response.text[:500] if exc.response is not None else ""
             raise RuntimeError(
                 f"OpenAI image generation failed: {exc.response.status_code} {body}"
             ) from exc
