@@ -759,3 +759,93 @@ async def test_list_jobs_created_at_descending(client, admin_token, db_session):
     # Verify each timestamp is >= the next (i.e. descending or equal).
     for a, b in zip(timestamps, timestamps[1:]):
         assert a >= b, f"Order violation: {a} < {b}"
+
+
+# ---------------------------------------------------------------------------
+# Delete endpoint tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_delete_job_success(client, admin_token):
+    """Deleting a non-active job returns 204 and removes it from the list."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Delete Me", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    delete_resp = await client.delete(f"/api/jobs/{job_id}", headers=headers)
+    assert delete_resp.status_code == 204
+
+    # Job should no longer exist
+    get_resp = await client.get(f"/api/jobs/{job_id}", headers=headers)
+    assert get_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_job_not_found(client, admin_token):
+    """Deleting a non-existent job returns 404."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    resp = await client.delete(
+        "/api/jobs/00000000-0000-0000-0000-000000000099",
+        headers=headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_job_requires_auth(client):
+    """Delete endpoint requires authentication."""
+    resp = await client.delete("/api/jobs/some-job-id")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_delete_processing_job_blocked(client, admin_token, db_session):
+    """Deleting a job in processing/rendering/uploading state returns 409."""
+    from sqlalchemy import update
+    from app.models.job import Job, JobStatus
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Active Job", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    # Force the job into processing state directly in DB
+    await db_session.execute(
+        update(Job).where(Job.id == job_id).values(status=JobStatus.processing)
+    )
+    await db_session.commit()
+
+    resp = await client.delete(f"/api/jobs/{job_id}", headers=headers)
+    assert resp.status_code == 409
+    assert "processing" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_delete_job_removed_from_list(client, admin_token):
+    """After deletion the job no longer appears in the list response."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "List Delete Test", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    await client.delete(f"/api/jobs/{job_id}", headers=headers)
+
+    list_resp = await client.get("/api/jobs", headers=headers)
+    ids = [j["id"] for j in list_resp.json()["items"]]
+    assert job_id not in ids

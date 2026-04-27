@@ -84,6 +84,18 @@ export function useCancelJob() {
   })
 }
 
+export function useDeleteJob() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`jobs/${id}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+  })
+}
+
 export function useDownloadJob() {
   return useMutation({
     mutationFn: async (job: Job) => {

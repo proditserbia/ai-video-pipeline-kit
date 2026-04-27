@@ -241,6 +241,25 @@ async def retry_job(
     return JobResponse.model_validate(job)
 
 
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    job = await _get_job_or_404(job_id, current_user.id, db)
+
+    active_statuses = {JobStatus.processing, JobStatus.rendering, JobStatus.uploading}
+    if job.status in active_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a job while it is processing",
+        )
+
+    await db.delete(job)
+    await db.commit()
+
+
 @router.get("/{job_id}/logs")
 async def stream_logs(
     job_id: str,
