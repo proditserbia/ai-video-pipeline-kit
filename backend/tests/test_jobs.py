@@ -635,3 +635,127 @@ async def test_visual_tags_in_raw_input_data_normalized(client, admin_token):
     assert isinstance(tags, list)
     assert "architecture" in tags
     assert "soldiers" in tags
+
+
+# ---------------------------------------------------------------------------
+# Ordering: newest-first
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_jobs_newest_first(client, admin_token, db_session):
+    """Jobs are returned ordered by created_at DESC (newest first).
+
+    We set explicit, distinct created_at timestamps (in the future so they
+    always sort above other test jobs) directly in the DB to avoid depending
+    on SQLite's second-level server_default precision.
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import update
+    from app.models.job import Job
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Create three jobs.
+    titles = ["Order-A", "Order-B", "Order-C"]
+    job_ids: list[str] = []
+    for title in titles:
+        resp = await client.post(
+            "/api/jobs",
+            json={"title": title, "topic": title, "dry_run": True},
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        job_ids.append(resp.json()["id"])
+
+    # Assign explicitly ordered created_at values well into the future so they
+    # always sort above any other jobs created by other tests (which use now()).
+    # A → +100 h (oldest of the three), B → +101 h, C → +102 h (newest).
+    base = datetime.now(tz=timezone.utc) + timedelta(hours=100)
+    for i, job_id in enumerate(job_ids):
+        ts = base + timedelta(hours=i)  # A oldest (+100h), C newest (+102h)
+        await db_session.execute(
+            update(Job).where(Job.id == job_id).values(created_at=ts)
+        )
+    await db_session.commit()
+
+    list_resp = await client.get("/api/jobs", headers=headers)
+    assert list_resp.status_code == 200
+    items = list_resp.json()["items"]
+
+    # Pull out only our three jobs in the order the API returned them.
+    returned = [j["title"] for j in items if j["title"] in set(titles)]
+    # Newest (Order-C, +102h) must appear first.
+    assert returned.index("Order-C") < returned.index("Order-B") < returned.index("Order-A")
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_newest_first_with_status_filter(client, admin_token, db_session):
+    """Ordering is preserved when a status filter is applied."""
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import update
+    from app.models.job import Job
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Create two pending jobs.
+    titles = ["Filter-Alpha", "Filter-Beta"]
+    job_ids: list[str] = []
+    for title in titles:
+        resp = await client.post(
+            "/api/jobs",
+            json={"title": title, "topic": title, "dry_run": True},
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        job_ids.append(resp.json()["id"])
+
+    # Alpha → +200h (older), Beta → +201h (newer), both in the future.
+    base = datetime.now(tz=timezone.utc) + timedelta(hours=200)
+    for i, job_id in enumerate(job_ids):
+        await db_session.execute(
+            update(Job).where(Job.id == job_id).values(created_at=base + timedelta(hours=i))
+        )
+    await db_session.commit()
+
+    list_resp = await client.get("/api/jobs?status=pending", headers=headers)
+    assert list_resp.status_code == 200
+    items = list_resp.json()["items"]
+
+    returned = [j["title"] for j in items if j["title"] in set(titles)]
+    # Filter-Beta (created later) must appear before Filter-Alpha.
+    assert returned.index("Filter-Beta") < returned.index("Filter-Alpha")
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_created_at_descending(client, admin_token, db_session):
+    """The created_at field of consecutive items must be non-ascending."""
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import update
+    from app.models.job import Job
+
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Create a few jobs and give them spread-out future timestamps.
+    base = datetime.now(tz=timezone.utc) + timedelta(hours=300)
+    job_ids: list[str] = []
+    for i in range(3):
+        resp = await client.post(
+            "/api/jobs",
+            json={"title": f"Sort-{i}", "topic": f"Sort-{i}", "dry_run": True},
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        job_ids.append(resp.json()["id"])
+        await db_session.execute(
+            update(Job).where(Job.id == job_ids[-1]).values(created_at=base + timedelta(hours=i))
+        )
+    await db_session.commit()
+
+    list_resp = await client.get("/api/jobs", headers=headers)
+    assert list_resp.status_code == 200
+    items = list_resp.json()["items"]
+
+    timestamps = [j["created_at"] for j in items]
+    # Verify each timestamp is >= the next (i.e. descending or equal).
+    for a, b in zip(timestamps, timestamps[1:]):
+        assert a >= b, f"Order violation: {a} < {b}"

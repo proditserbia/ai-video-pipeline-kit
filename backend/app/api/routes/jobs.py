@@ -62,7 +62,9 @@ async def list_jobs(
         count_query = count_query.where(Job.project_id == project_id)
 
     total = (await db.execute(count_query)).scalar_one()
-    jobs_result = await db.execute(query.offset((page - 1) * size).limit(size))
+    jobs_result = await db.execute(
+        query.order_by(Job.created_at.desc()).offset((page - 1) * size).limit(size)
+    )
     jobs = jobs_result.scalars().all()
 
     return JobListResponse(
