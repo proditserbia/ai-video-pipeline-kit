@@ -5,6 +5,7 @@ import { useJobs, useRetryJob, useCancelJob } from '@/hooks/useJobs'
 import { useProjects } from '@/hooks/useProjects'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
 import ResultQualityBadge from '@/components/jobs/ResultQualityBadge'
+import JobThumbnail from '@/components/jobs/JobThumbnail'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
@@ -85,6 +86,7 @@ export default function JobsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-16">Preview</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Quality</TableHead>
@@ -96,13 +98,24 @@ export default function JobsPage() {
               <TableBody>
                 {jobs?.items?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-12 text-center text-gray-400">
+                    <TableCell colSpan={7} className="py-12 text-center text-gray-400">
                       No jobs found
                     </TableCell>
                   </TableRow>
                 ) : (
                   jobs?.items?.map((job) => (
                     <TableRow key={job.id}>
+                      <TableCell className="w-16">
+                        {job.thumbnail_url ? (
+                          <JobThumbnail
+                            jobId={job.id}
+                            className="h-14 w-8 rounded object-cover"
+                            alt={job.title}
+                          />
+                        ) : (
+                          <div className="h-14 w-8 rounded bg-gray-700" />
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">{job.title}</TableCell>
                       <TableCell><JobStatusBadge status={job.status} /></TableCell>
                       <TableCell>

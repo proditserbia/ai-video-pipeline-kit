@@ -315,3 +315,169 @@ async def test_retry_job_celery_dispatch_failure_returns_503(
     assert job.logs is not None
     assert "Celery dispatch failed" in job.logs
 
+
+# ---------------------------------------------------------------------------
+# Thumbnail endpoint tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_no_thumbnail_returns_404(client, admin_token):
+    """A job with no thumbnail_path in output_metadata returns 404."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "No Thumbnail Job", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    resp = await client.get(f"/api/v1/jobs/{job_id}/thumbnail", headers=headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_missing_file_returns_404(client, admin_token, session_factory):
+    """A job whose thumbnail_path points to a non-existent file returns 404."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Ghost Thumbnail", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        nonexistent = os.path.join(tmpdir, "thumb.jpg")
+
+        from sqlalchemy import update
+        from app.models.job import Job
+        from app.config import settings as app_settings
+
+        original_storage = app_settings.STORAGE_PATH
+        app_settings.STORAGE_PATH = tmpdir
+        try:
+            async with session_factory() as db:
+                await db.execute(
+                    update(Job).where(Job.id == job_id).values(
+                        output_metadata={"thumbnail_path": nonexistent}
+                    )
+                )
+                await db.commit()
+
+            resp = await client.get(
+                f"/api/v1/jobs/{job_id}/thumbnail",
+                headers=headers,
+            )
+            assert resp.status_code == 404
+        finally:
+            app_settings.STORAGE_PATH = original_storage
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_valid_returns_200(client, admin_token, session_factory):
+    """A completed job with a real thumbnail file on disk returns 200 image/jpeg."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Thumb Test Job", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        thumb_path = os.path.join(tmpdir, f"{job_id}_thumb.jpg")
+        # Write minimal JPEG-like bytes so the file exists
+        with open(thumb_path, "wb") as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 12)  # minimal JPEG header
+
+        from sqlalchemy import update
+        from app.models.job import Job
+        from app.config import settings as app_settings
+
+        original_storage = app_settings.STORAGE_PATH
+        app_settings.STORAGE_PATH = tmpdir
+        try:
+            async with session_factory() as db:
+                await db.execute(
+                    update(Job).where(Job.id == job_id).values(
+                        output_metadata={"thumbnail_path": thumb_path}
+                    )
+                )
+                await db.commit()
+
+            resp = await client.get(
+                f"/api/v1/jobs/{job_id}/thumbnail",
+                headers=headers,
+            )
+            assert resp.status_code == 200
+            assert resp.headers["content-type"].startswith("image/jpeg")
+        finally:
+            app_settings.STORAGE_PATH = original_storage
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_requires_auth(client, admin_token, session_factory):
+    """The thumbnail endpoint requires authentication; no token → 403."""
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Auth Thumb Test", "dry_run": True},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    # No auth header
+    resp = await client.get(f"/api/v1/jobs/{job_id}/thumbnail")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_other_user_cannot_access(client, session_factory):
+    """A second user cannot access a thumbnail belonging to another user."""
+    from app.core.security import hash_password, create_access_token
+    from app.models.user import User
+    from sqlalchemy import select
+
+    # Ensure a second user exists
+    async with session_factory() as db:
+        result = await db.execute(select(User).where(User.email == "thumb_other@example.com"))
+        other_user = result.scalar_one_or_none()
+        if not other_user:
+            other_user = User(
+                email="thumb_other@example.com",
+                hashed_password=hash_password("pass"),
+                is_active=True,
+            )
+            db.add(other_user)
+            await db.commit()
+            await db.refresh(other_user)
+        other_token = create_access_token(subject=other_user.id)
+
+    # Ensure first (admin) user exists and create a job for them
+    async with session_factory() as db:
+        result = await db.execute(select(User).where(User.email == "test@example.com"))
+        admin_user = result.scalar_one_or_none()
+    admin_token_local = create_access_token(subject=admin_user.id)
+    admin_headers = {"Authorization": f"Bearer {admin_token_local}"}
+
+    create_resp = await client.post(
+        "/api/jobs",
+        json={"title": "Admin Only Thumb", "dry_run": True},
+        headers=admin_headers,
+    )
+    assert create_resp.status_code == 201
+    job_id = create_resp.json()["id"]
+
+    # Second user tries to access the thumbnail – ownership check returns 404
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+    resp = await client.get(f"/api/v1/jobs/{job_id}/thumbnail", headers=other_headers)
+    assert resp.status_code == 404

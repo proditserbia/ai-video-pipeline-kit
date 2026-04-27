@@ -11,6 +11,9 @@ from worker.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
 
+# Caption style values that mean "disabled" (no captions, no Whisper).
+_DISABLED_CAPTION_STYLES: frozenset = frozenset({None, "", "None", "none"})
+
 
 def _run_async(coro):
     """Execute an async coroutine safely from a synchronous Celery task."""
@@ -66,15 +69,24 @@ def _resolve_voice(input_data: dict) -> str:
     return voice or "en-US-AriaNeural"
 
 
-def _resolve_caption_style(input_data: dict) -> str | None:
+def _resolve_caption_style(input_data: dict) -> str:
+    """Return the requested caption style.
+
+    "none" (or any disabled signal: None, empty string, the literal string
+    "None") is normalised to the canonical value ``"none"``.
+    """
     style = input_data.get("caption_style")
-    if style:
-        return style
-    # Headless API may nest it inside a captions config dict
+    if style not in _DISABLED_CAPTION_STYLES:
+        return str(style)
+
+    # Headless API may nest it inside a captions config dict.
     captions_cfg = input_data.get("captions", {})
     if isinstance(captions_cfg, dict):
-        return captions_cfg.get("style")
-    return None
+        nested = captions_cfg.get("style")
+        if nested not in _DISABLED_CAPTION_STYLES:
+            return str(nested)
+
+    return "none"
 
 
 def _cleanup_work_dir(work_dir: Path, job_id: str, *, keep: bool = False) -> None:
@@ -329,7 +341,18 @@ def run_video_pipeline(self, job_id: str) -> dict:
 
         # ── Step 6: Captions ───────────────────────────────────────────
         srt_path: Path | None = None
-        if flags.is_enabled("captions") and audio_path and not job.dry_run:
+        caption_style = _resolve_caption_style(input_data)
+
+        if caption_style == "none":
+            # User explicitly disabled captions – skip Whisper entirely.
+            _append_log(db, job, "Captions disabled by user")
+            log.info("captions_disabled_by_user")
+            job.output_metadata = {
+                **(job.output_metadata or {}),
+                "caption_status": "disabled",
+            }
+            db.commit()
+        elif flags.is_enabled("captions") and audio_path and not job.dry_run:
             from worker.modules.captions.whisper_provider import WhisperCaptionProvider
 
             _cap_skip_reason: str | None = None
@@ -378,7 +401,6 @@ def run_video_pipeline(self, job_id: str) -> dict:
 
         # ── Step 7: Build video ────────────────────────────────────────
         output_path: Path | None = None
-        caption_style = _resolve_caption_style(input_data)
         watermark_asset_id, watermark_path, bg_music_asset_id, bg_music_path = (
             _resolve_brand_assets(db, input_data, job)
         )
