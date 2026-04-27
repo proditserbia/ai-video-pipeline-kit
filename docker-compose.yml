@@ -49,6 +49,11 @@ services:
       - STORAGE_PATH=/storage
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - MEDIA_MODE=${MEDIA_MODE:-stock}
+      - AI_IMAGE_ENABLED=${AI_IMAGE_ENABLED:-false}
+      - AI_IMAGE_PROVIDER=${AI_IMAGE_PROVIDER:-openai}
+      - AI_IMAGE_ASPECT_RATIO=${AI_IMAGE_ASPECT_RATIO:-9:16}
+      - STABILITY_AI_API_KEY=${STABILITY_AI_API_KEY:-}
     volumes:
       - storage_data:/storage
     ports:
@@ -80,6 +85,11 @@ services:
       - EDGE_TTS_ENABLED=${EDGE_TTS_ENABLED:-false}
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
       - PIXABAY_API_KEY=${PIXABAY_API_KEY:-}
+      - MEDIA_MODE=${MEDIA_MODE:-stock}
+      - AI_IMAGE_ENABLED=${AI_IMAGE_ENABLED:-false}
+      - AI_IMAGE_PROVIDER=${AI_IMAGE_PROVIDER:-openai}
+      - AI_IMAGE_ASPECT_RATIO=${AI_IMAGE_ASPECT_RATIO:-9:16}
+      - STABILITY_AI_API_KEY=${STABILITY_AI_API_KEY:-}
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-void}
     volumes:
       - storage_data:/storage

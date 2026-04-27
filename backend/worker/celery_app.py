@@ -32,6 +32,8 @@ celery_app.conf.update(
 
 
 @worker_ready.connect
-def log_tts_config_on_worker_ready(**kwargs):
+def log_worker_config(**kwargs):
     from worker.modules.tts.selector import log_tts_config
+    from worker.modules.stock_media.selector import log_media_config
     log_tts_config()
+    log_media_config()

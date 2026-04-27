@@ -8,6 +8,18 @@ from worker.modules.base import MediaAsset
 logger = structlog.get_logger(__name__)
 
 
+def log_media_config() -> None:
+    """Log a media configuration summary at worker startup. Secrets are never logged."""
+    logger.info(
+        "media_config_summary",
+        MEDIA_MODE=settings.MEDIA_MODE,
+        AI_IMAGE_ENABLED=settings.AI_IMAGE_ENABLED,
+        AI_IMAGE_PROVIDER=settings.AI_IMAGE_PROVIDER,
+        AI_IMAGE_ASPECT_RATIO=settings.AI_IMAGE_ASPECT_RATIO,
+        OPENAI_API_KEY_present=bool(settings.OPENAI_API_KEY),
+    )
+
+
 class StockMediaSelector:
     """
     Select media clips using a priority chain controlled by ``MEDIA_MODE``:
