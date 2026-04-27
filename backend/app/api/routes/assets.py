@@ -42,6 +42,8 @@ async def list_assets(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AssetListResponse:
+    if size < 1:
+        size = 20
     query = select(Asset).where(Asset.user_id == current_user.id)
     count_query = select(func.count(Asset.id)).where(Asset.user_id == current_user.id)
 
