@@ -466,6 +466,41 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     )
                     _append_log(db, job, f"Narration blocks planned: {len(blocks)}")
 
+                    # Optional: override block image prompts with AI-generated
+                    # visual briefs when AI_VISUAL_PLANNER_ENABLED=True.
+                    if settings.AI_VISUAL_PLANNER_ENABLED:
+                        try:
+                            from worker.modules.ai_images.visual_planner import (
+                                plan_visual_briefs,
+                            )
+                            briefs = plan_visual_briefs(
+                                _topic,
+                                _visual_tags or [],
+                                script_text,
+                                blocks,
+                            )
+                            if briefs:
+                                briefs_by_index = {b.block_index: b for b in briefs}
+                                for block in blocks:
+                                    brief = briefs_by_index.get(block.index)
+                                    if brief and brief.visual_prompt:
+                                        block.image_prompt = brief.visual_prompt
+                                        log.info(
+                                            "ai_visual_planner_prompt_applied",
+                                            block=block.index,
+                                            prompt_preview=brief.visual_prompt[:120],
+                                        )
+                                _append_log(
+                                    db, job,
+                                    f"AI visual planner applied {len(briefs)} visual briefs",
+                                )
+                        except Exception as vp_exc:
+                            log.warning(
+                                "ai_visual_planner_error",
+                                error=str(vp_exc),
+                            )
+                            _append_log(db, job, f"AI visual planner error (non-fatal): {vp_exc}")
+
                     # Instantiate the configured AI image provider once.
                     try:
                         ai_provider = get_ai_image_provider()

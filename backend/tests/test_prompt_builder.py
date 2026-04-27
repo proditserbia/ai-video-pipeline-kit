@@ -1188,3 +1188,609 @@ class TestScriptGenerationSubjectInjection:
         # Without specific tags, there should be no extra focus line.
         assert "must focus on" not in user_msg.lower()
 
+
+# ── TestGroundhogDayScenario ──────────────────────────────────────────────────
+
+
+class TestGroundhogDayScenario:
+    """Full Groundhog Day festival scenario.
+
+    Visual tags include "festival" and "groundhog", and the script describes
+    the annual Punxsutawney celebration.  Generated image prompts must:
+
+    - Reflect the festival/ceremony atmosphere rather than generic habitat shots.
+    - Reference the crowd, season, and event context from the script.
+    - Never produce "foraging" or "natural habitat" prompts for crowd/event blocks.
+    - Always include the resolved subject ("groundhog") somewhere.
+    - Always append the negative-prompt suffix.
+    """
+
+    _SCRIPT = (
+        "Every year on February 2nd, people gather in Punxsutawney, Pennsylvania "
+        "for one of America's most beloved traditions — Groundhog Day.\n\n"
+        "Thousands of bundled-up spectators crowd Gobbler's Knob, waiting for "
+        "Punxsutawney Phil to emerge from his burrow and predict the weather.\n\n"
+        "The crowd erupts in cheers as handlers lift Phil from his stump and "
+        "check for his shadow during the ceremony.\n\n"
+        "If Phil sees his shadow, it means six more weeks of winter; "
+        "if not, spring is coming early!\n\n"
+        "Happy Groundhog Day, everyone!"
+    )
+
+    _TOPIC = "groundhog"
+    _TAGS = ["festival", "groundhog"]
+
+    def _build_prompts(self, n: int = 4) -> list[str]:
+        paragraphs = [p.strip() for p in self._SCRIPT.split("\n\n") if p.strip()]
+        prompts: list[str] = []
+        for i in range(n):
+            p = build_image_prompt(
+                paragraphs[i % len(paragraphs)],
+                self._TOPIC,
+                block_index=i,
+                total_blocks=n,
+                visual_tags=self._TAGS,
+                full_script_text=self._SCRIPT,
+            )
+            prompts.append(p)
+        return prompts
+
+    # ── festival tag must not be ignored ─────────────────────────────────────
+
+    def test_festival_tag_not_ignored(self):
+        """At least one prompt must reflect festival/ceremony/event atmosphere."""
+        prompts = self._build_prompts()
+        festival_words = {"festival", "ceremony", "event", "celebration", "gathering"}
+        found = any(
+            any(w in p.lower() for w in festival_words) for p in prompts
+        )
+        assert found, (
+            "festival tag completely ignored in all prompts:\n"
+            + "\n".join(f"  [{i}] {p}" for i, p in enumerate(prompts))
+        )
+
+    # ── crowd block must not produce "foraging" ───────────────────────────────
+
+    def test_crowd_block_not_foraging(self):
+        """Block text about a crowd must not produce 'groundhog foraging'."""
+        crowd_block = (
+            "Thousands of bundled-up spectators crowd Gobbler's Knob, waiting "
+            "for Punxsutawney Phil to emerge from his burrow and predict the weather."
+        )
+        # block_index=2 maps to the "foraging" shot-type slot in the animal plan.
+        prompt = build_image_prompt(
+            crowd_block,
+            self._TOPIC,
+            block_index=2,
+            total_blocks=5,
+            visual_tags=self._TAGS,
+            full_script_text=self._SCRIPT,
+        )
+        assert "foraging" not in prompt.lower(), (
+            f"Crowd block produced a 'foraging' prompt: {prompt!r}"
+        )
+
+    # ── no generic habitat prompts when context is festival ───────────────────
+
+    def test_prompts_not_all_generic_habitat(self):
+        """With festival context, most prompts must not be pure habitat shots."""
+        prompts = self._build_prompts()
+        generic_phrases = ["in natural habitat", "foraging or eating"]
+        generic_count = sum(
+            1
+            for p in prompts
+            if any(ph.lower() in p.lower() for ph in generic_phrases)
+        )
+        # Allow at most one generic fallback out of four blocks.
+        assert generic_count <= 1, (
+            f"{generic_count}/{len(prompts)} prompts are generic habitat prompts. "
+            "Expected at most 1 when festival context is present.\n"
+            + "\n".join(f"  [{i}] {p}" for i, p in enumerate(prompts))
+        )
+
+    # ── context terms from script must appear somewhere ───────────────────────
+
+    def test_prompts_contain_event_or_crowd_context(self):
+        """At least some prompts must reference Groundhog Day, winter, or crowd."""
+        prompts = self._build_prompts()
+        context_words = {
+            "groundhog day", "punxsutawney", "winter", "crowd",
+            "ceremony", "festival", "february",
+        }
+        found = any(
+            any(w in p.lower() for w in context_words) for p in prompts
+        )
+        assert found, (
+            "No context terms found in any prompt:\n"
+            + "\n".join(f"  [{i}] {p}" for i, p in enumerate(prompts))
+        )
+
+    # ── subject must appear in every prompt ──────────────────────────────────
+
+    def test_all_prompts_include_groundhog(self):
+        """The resolved subject 'groundhog' must appear in every prompt."""
+        prompts = self._build_prompts()
+        for i, p in enumerate(prompts):
+            assert "groundhog" in p.lower(), (
+                f"Subject 'groundhog' missing from block {i} prompt: {p!r}"
+            )
+
+    # ── negative-prompt suffix must always be present ─────────────────────────
+
+    def test_all_prompts_include_no_text_suffix(self):
+        prompts = self._build_prompts()
+        for i, p in enumerate(prompts):
+            assert "No text" in p, (
+                f"'No text' suffix missing from block {i} prompt: {p!r}"
+            )
+
+    # ── specificity scoring ───────────────────────────────────────────────────
+
+    def test_specificity_score_reasonable(self):
+        """Prompts for festival blocks should have a specificity score >= 2."""
+        from worker.modules.ai_images.prompt_builder import _score_prompt_specificity
+
+        paragraphs = [p.strip() for p in self._SCRIPT.split("\n\n") if p.strip()]
+        for i in range(min(4, len(paragraphs))):
+            p = build_image_prompt(
+                paragraphs[i],
+                self._TOPIC,
+                block_index=i,
+                total_blocks=4,
+                visual_tags=self._TAGS,
+                full_script_text=self._SCRIPT,
+            )
+            score = _score_prompt_specificity(p, "groundhog", self._TAGS, paragraphs[i])
+            assert score >= 2, (
+                f"Block {i} specificity score too low ({score}): {p!r}"
+            )
+
+    # ── prompt must not start with the negative suffix ────────────────────────
+
+    def test_prompt_does_not_start_with_no_text(self):
+        """The 'No text' negative instruction must appear at the end, not the start."""
+        prompts = self._build_prompts()
+        for i, p in enumerate(prompts):
+            assert not p.startswith("No text"), (
+                f"Block {i} prompt starts with 'No text': {p!r}"
+            )
+
+    # ── extract_visual_context API ────────────────────────────────────────────
+
+    def test_extract_visual_context_festival_tag(self):
+        """extract_visual_context must detect 'festival' from visual_tags."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "People gather in Punxsutawney.",
+            visual_tags=["festival", "groundhog"],
+            topic="groundhog",
+        )
+        assert ctx["event_type"] == "festival"
+
+    def test_extract_visual_context_named_event(self):
+        """extract_visual_context must detect 'Groundhog Day' from block text."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "Every year on Groundhog Day, crowds gather to watch.",
+            visual_tags=["festival"],
+            topic="groundhog",
+        )
+        assert "Groundhog Day" in ctx["named_events"]
+
+    def test_extract_visual_context_location(self):
+        """extract_visual_context must detect 'Punxsutawney' as location."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "People gather in Punxsutawney, Pennsylvania.",
+            visual_tags=[],
+            topic="groundhog",
+        )
+        assert ctx["location"] == "Punxsutawney"
+
+    def test_extract_visual_context_winter(self):
+        """February in block text must trigger 'winter' season."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "On February 2nd, bundled-up crowds gather.",
+            visual_tags=[],
+            topic="groundhog",
+        )
+        assert ctx["season"] == "winter"
+
+    def test_extract_visual_context_crowd(self):
+        """Block text with 'crowd' or 'spectators' must set has_crowd=True."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "Thousands of bundled-up spectators crowd the area.",
+            visual_tags=[],
+            topic="groundhog",
+        )
+        assert ctx["has_crowd"] is True
+
+    def test_extract_visual_context_terms_populated(self):
+        """context_terms list must include detected terms for logging."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "People gather in Punxsutawney on Groundhog Day.",
+            visual_tags=["festival"],
+            topic="groundhog",
+        )
+        terms = ctx["context_terms"]
+        assert "festival" in terms
+        assert "Punxsutawney" in terms
+
+    def test_full_script_provides_global_context(self):
+        """Location from the full script must be used even if absent from the block."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "Crowds cheer as the groundhog is lifted.",
+            visual_tags=["festival"],
+            topic="groundhog",
+            full_script_text="Every year people gather in Punxsutawney for Groundhog Day.",
+        )
+        # Punxsutawney comes from the full script, not the block.
+        assert ctx["location"] == "Punxsutawney"
+
+
+# ── TestUltraShortBlockMerge ──────────────────────────────────────────────────
+
+
+class TestUltraShortBlockMerge:
+    """Ultra-short outro blocks must be merged, not given their own image slot.
+
+    The block "Happy Groundhog Day, everyone!" is ~5 words — well below the
+    ~7-word threshold derived from MIN_VISUAL_BLOCK_SECONDS=3.0 seconds at
+    130 wpm.  It must be merged into the preceding block.
+    """
+
+    _SHORT_OUTRO = "Happy Groundhog Day, everyone!"
+
+    _MAIN_SCRIPT = (
+        "People gather in Punxsutawney every February for Groundhog Day.\n\n"
+        "Thousands of bundled-up fans wait for Punxsutawney Phil to emerge "
+        "from his burrow.\n\n"
+        "The crowd erupts when the groundhog is lifted by his handlers "
+        "during the ceremony.\n\n"
+    )
+
+    def test_short_outro_not_a_standalone_block(self):
+        """'Happy Groundhog Day, everyone!' must be merged, not standalone."""
+        from worker.modules.script_planner.planner import plan_narration_blocks
+
+        script = self._MAIN_SCRIPT + self._SHORT_OUTRO
+        blocks = plan_narration_blocks(script, topic="groundhog", visual_tags=["festival"])
+        texts = [b.text for b in blocks]
+        assert not any(t.strip() == self._SHORT_OUTRO for t in texts), (
+            f"Ultra-short outro block was not merged. Blocks:\n"
+            + "\n".join(f"  [{i}] {t!r}" for i, t in enumerate(texts))
+        )
+
+    def test_short_block_content_preserved_after_merge(self):
+        """The merged block must contain the short outro text somewhere."""
+        from worker.modules.script_planner.planner import plan_narration_blocks
+
+        script = self._MAIN_SCRIPT + self._SHORT_OUTRO
+        blocks = plan_narration_blocks(script, topic="groundhog")
+        all_text = " ".join(b.text for b in blocks)
+        assert "Happy Groundhog Day" in all_text, (
+            "Ultra-short block content was lost during merge"
+        )
+
+    def test_short_block_reduces_block_count(self):
+        """Adding an ultra-short outro must not increase the block count."""
+        from worker.modules.script_planner.planner import plan_narration_blocks
+
+        blocks_without = plan_narration_blocks(self._MAIN_SCRIPT, topic="groundhog")
+        blocks_with = plan_narration_blocks(
+            self._MAIN_SCRIPT + self._SHORT_OUTRO, topic="groundhog"
+        )
+        assert len(blocks_with) <= len(blocks_without), (
+            f"Short block was not merged: "
+            f"{len(blocks_with)} blocks with short outro vs "
+            f"{len(blocks_without)} without it"
+        )
+
+    def test_merge_ultra_short_text_blocks_helper(self):
+        """_merge_ultra_short_text_blocks must merge short tail into previous."""
+        from worker.modules.script_planner.planner import _merge_ultra_short_text_blocks
+
+        long_block = "Thousands of bundled-up fans wait for Punxsutawney Phil to emerge."
+        short_block = "Happy Groundhog Day!"  # 3 words — well below threshold
+
+        result = _merge_ultra_short_text_blocks([long_block, short_block])
+        assert len(result) == 1, (
+            f"Expected 1 merged block, got {len(result)}: {result}"
+        )
+        assert "Happy Groundhog Day" in result[0]
+
+    def test_merge_preserves_adequate_blocks(self):
+        """Blocks long enough to justify an image slot must NOT be merged."""
+        from worker.modules.script_planner.planner import _merge_ultra_short_text_blocks
+
+        block_a = (
+            "Thousands of bundled-up spectators crowd Gobbler's Knob, "
+            "waiting for Punxsutawney Phil to emerge from his burrow."
+        )
+        block_b = (
+            "The crowd erupts when handlers lift Phil from his stump "
+            "and check for his shadow during the ceremony."
+        )
+
+        result = _merge_ultra_short_text_blocks([block_a, block_b])
+        assert len(result) == 2, (
+            f"Adequate-length blocks were merged unexpectedly: {result}"
+        )
+
+    def test_single_block_returned_unchanged(self):
+        """A list with one block must be returned as-is."""
+        from worker.modules.script_planner.planner import _merge_ultra_short_text_blocks
+
+        blocks = ["Single block with enough words to pass the threshold easily."]
+        result = _merge_ultra_short_text_blocks(blocks)
+        assert result == blocks
+
+    def test_all_short_blocks_get_merged(self):
+        """If two consecutive blocks are short, they both merge with the next long one."""
+        from worker.modules.script_planner.planner import _merge_ultra_short_text_blocks
+
+        short1 = "Hey there!"  # 2 words
+        short2 = "Good morning!"  # 2 words
+        long_block = (
+            "Thousands of people gather every year in Punxsutawney "
+            "for the famous Groundhog Day celebration."
+        )
+        # short1 is too short → stays pending → merges with short2 → still short → merges with long
+        result = _merge_ultra_short_text_blocks([short1, short2, long_block])
+        # The result must not contain short1 or short2 as standalone entries.
+        assert all(
+            t not in (short1, short2) for t in result
+        ), f"Short blocks not merged: {result}"
+
+
+# ── TestVisualPlannerSchema ───────────────────────────────────────────────────
+
+
+class TestVisualPlannerSchema:
+    """Visual planner output must conform to the expected JSON / dataclass schema."""
+
+    def test_visual_brief_structure(self):
+        """VisualBrief dataclass must have expected fields."""
+        from worker.modules.ai_images.visual_planner import VisualBrief
+
+        brief = VisualBrief(
+            block_index=0,
+            shot_type="establishing",
+            visual_prompt="Wide establishing shot of Groundhog Day festival",
+            negative_prompt="No text, no captions, no logos.",
+        )
+        assert brief.block_index == 0
+        assert brief.shot_type == "establishing"
+        assert "festival" in brief.visual_prompt
+        assert "No text" in brief.negative_prompt
+
+    def test_visual_prompt_field_has_no_negative_instructions(self):
+        """The visual_prompt field must NOT contain 'No text' / caption instructions."""
+        from worker.modules.ai_images.visual_planner import VisualBrief
+
+        brief = VisualBrief(
+            block_index=0,
+            shot_type="establishing",
+            visual_prompt="Wide establishing shot of Groundhog Day festival, photorealistic vertical 9:16",
+            negative_prompt="No text, no captions, no subtitles, no logos.",
+        )
+        assert "No text" not in brief.visual_prompt, (
+            "visual_prompt should not contain negative prompt instructions; "
+            "those belong in negative_prompt"
+        )
+        assert "No text" in brief.negative_prompt
+
+    def test_plan_visual_briefs_returns_none_when_disabled(self):
+        """When AI_VISUAL_PLANNER_ENABLED=False, plan_visual_briefs returns None."""
+        import unittest.mock as mock
+        from worker.modules.ai_images import visual_planner
+
+        with mock.patch.object(visual_planner.settings, "AI_VISUAL_PLANNER_ENABLED", False):
+            result = visual_planner.plan_visual_briefs(
+                "groundhog", ["festival"], "script text here.", []
+            )
+        assert result is None
+
+    def test_plan_visual_briefs_returns_none_for_none_provider(self):
+        """When AI_VISUAL_PLANNER_PROVIDER='none', returns None even if enabled."""
+        import unittest.mock as mock
+        from worker.modules.ai_images import visual_planner
+
+        with mock.patch.object(visual_planner.settings, "AI_VISUAL_PLANNER_ENABLED", True):
+            with mock.patch.object(
+                visual_planner.settings, "AI_VISUAL_PLANNER_PROVIDER", "none"
+            ):
+                result = visual_planner.plan_visual_briefs(
+                    "groundhog", ["festival"], "script text here.", []
+                )
+        assert result is None
+
+    def test_plan_visual_briefs_returns_none_without_api_key(self):
+        """When no OPENAI_API_KEY is configured, the OpenAI planner returns None."""
+        import unittest.mock as mock
+        from worker.modules.ai_images import visual_planner
+
+        with mock.patch.object(visual_planner.settings, "AI_VISUAL_PLANNER_ENABLED", True):
+            with mock.patch.object(
+                visual_planner.settings, "AI_VISUAL_PLANNER_PROVIDER", "openai"
+            ):
+                with mock.patch.object(visual_planner.settings, "OPENAI_API_KEY", None):
+                    result = visual_planner.plan_visual_briefs(
+                        "groundhog", ["festival"], "script text here.", []
+                    )
+        assert result is None
+
+    def test_plan_visual_briefs_returns_none_for_unknown_provider(self):
+        """An unrecognised provider name returns None without raising."""
+        import unittest.mock as mock
+        from worker.modules.ai_images import visual_planner
+
+        with mock.patch.object(visual_planner.settings, "AI_VISUAL_PLANNER_ENABLED", True):
+            with mock.patch.object(
+                visual_planner.settings, "AI_VISUAL_PLANNER_PROVIDER", "unsupported_xyz"
+            ):
+                result = visual_planner.plan_visual_briefs(
+                    "groundhog", ["festival"], "script text here.", []
+                )
+        assert result is None
+
+
+# ── TestPromptNoTextInVisualPart ──────────────────────────────────────────────
+
+
+class TestPromptNoTextInVisualPart:
+    """The 'No text' negative instruction must appear at the end of the prompt,
+    not at the very beginning (which would mean the instruction leaked into
+    the visual description section).
+    """
+
+    def test_prompt_does_not_start_with_no_text(self):
+        prompt = build_image_prompt(
+            "People gather for the Groundhog Day ceremony in Punxsutawney.",
+            "groundhog",
+            block_index=0,
+            total_blocks=5,
+            visual_tags=["festival", "groundhog"],
+        )
+        assert not prompt.startswith("No text"), (
+            "Prompt starts with 'No text' — negative instructions leaked to the front"
+        )
+
+    def test_no_text_suffix_present(self):
+        prompt = build_image_prompt(
+            "People gather for the Groundhog Day ceremony in Punxsutawney.",
+            "groundhog",
+            block_index=0,
+            total_blocks=5,
+            visual_tags=["festival", "groundhog"],
+        )
+        assert "No text" in prompt, "Negative prompt suffix missing"
+
+    def test_various_topics_prompt_does_not_start_with_no_text(self):
+        """Across topic/tag combinations, no prompt must start with 'No text'."""
+        cases = [
+            ("jazz music", ["concert", "stage"], "Jazz musicians play on stage."),
+            ("ancient rome", ["history", "architecture"], "The Roman Forum was busy."),
+            ("groundhog", ["festival", "groundhog"], "Crowds gather in Punxsutawney."),
+            ("solar energy", [], "Solar panels convert sunlight to electricity."),
+        ]
+        for topic, tags, text in cases:
+            prompt = build_image_prompt(text, topic, block_index=0, total_blocks=3, visual_tags=tags)
+            assert not prompt.startswith("No text"), (
+                f"Prompt for topic={topic!r} starts with 'No text': {prompt!r}"
+            )
+
+    def test_stock_mode_prompt_building_unchanged(self):
+        """build_image_prompt without any AI-specific args still works (stock path)."""
+        prompt = build_image_prompt(
+            "Bees are essential pollinators in our ecosystem.",
+            "beekeeping",
+            block_index=1,
+            total_blocks=3,
+        )
+        assert prompt.strip() != ""
+        assert "No text" in prompt
+        assert "beekeeping" in prompt.lower() or "bee" in prompt.lower()
+
+
+# ── TestExtractVisualContextEdgeCases ─────────────────────────────────────────
+
+
+class TestExtractVisualContextEdgeCases:
+    """Edge cases for extract_visual_context."""
+
+    def test_empty_text_returns_empty_context(self):
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context("", visual_tags=[], topic="")
+        assert ctx["event_type"] is None
+        assert ctx["named_events"] == []
+        assert ctx["location"] is None
+        assert ctx["has_crowd"] is False
+
+    def test_no_tags_no_context_falls_back_to_template(self):
+        """When there is no context, build_image_prompt falls back to template."""
+        prompt = build_image_prompt(
+            "Honeybees flying around wildflowers in a garden.",
+            "beekeeping",
+            block_index=0,
+            total_blocks=3,
+        )
+        # Template for beekeeping / general: must include the subject.
+        assert "beekeep" in prompt.lower() or "bee" in prompt.lower() or "honey" in prompt.lower()
+
+    def test_all_named_event_patterns_detected(self):
+        """Spot-check a few named event patterns."""
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        tests = [
+            ("The Super Bowl parade was huge.", "Super Bowl"),
+            ("Mardi Gras celebrations fill the streets.", "Mardi Gras"),
+            ("Halloween costumes crowd the neighbourhood.", "Halloween"),
+        ]
+        for text, expected_event in tests:
+            ctx = extract_visual_context(text, visual_tags=[], topic="")
+            assert expected_event in ctx["named_events"], (
+                f"Expected {expected_event!r} in named_events for text: {text!r}"
+            )
+
+    def test_season_detection_winter(self):
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context("Snow falls on the frozen lake in winter.", [], "")
+        assert ctx["season"] == "winter"
+
+    def test_season_detection_spring(self):
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context("Cherry blossoms bloom in spring.", [], "")
+        assert ctx["season"] == "spring"
+
+    def test_has_weather_shadow(self):
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "The groundhog looks for its shadow to predict the weather.", [], "groundhog"
+        )
+        assert ctx["has_weather"] is True
+
+    def test_has_celebration_cheer(self):
+        from worker.modules.ai_images.prompt_builder import extract_visual_context
+
+        ctx = extract_visual_context(
+            "The crowd cheers with excitement as the celebration begins.", [], ""
+        )
+        assert ctx["has_celebration"] is True
+
+    def test_score_specificity_low_for_generic(self):
+        from worker.modules.ai_images.prompt_builder import _score_prompt_specificity
+
+        generic = "Wide establishing shot of groundhog in natural habitat, full environment visible."
+        score = _score_prompt_specificity(generic, "groundhog", [], "")
+        # Subject present (+2), no tags, no named locations, no event, no season, no crowd.
+        assert score <= 3
+
+    def test_score_specificity_higher_for_event_prompt(self):
+        from worker.modules.ai_images.prompt_builder import _score_prompt_specificity
+
+        specific = (
+            "Wide establishing shot of Groundhog Day festival in Punxsutawney, "
+            "winter morning, crowd gathered, groundhog ceremony stage visible, "
+            "photorealistic vertical 9:16"
+        )
+        score = _score_prompt_specificity(specific, "groundhog", ["festival"], "")
+        # Subject (+2), tag (+1), named location capital (+2), event (+1),
+        # season (+1), crowd (+1) = 8.
+        assert score >= 5
+
