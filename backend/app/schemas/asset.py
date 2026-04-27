@@ -22,7 +22,18 @@ class AssetCreate(AssetBase):
 class AssetResponse(AssetBase):
     id: int
     project_id: int | None
+    name: str | None
+    asset_type: str | None
+    file_size: int | None
     file_path: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AssetListResponse(BaseModel):
+    items: list[AssetResponse]
+    total: int
+    page: int
+    size: int
+    pages: int

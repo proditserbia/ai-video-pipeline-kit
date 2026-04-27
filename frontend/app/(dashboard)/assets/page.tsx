@@ -54,14 +54,23 @@ export default function AssetsPage() {
   const deleteAsset = useDeleteAsset()
   const uploadAsset = useUploadAsset()
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null)
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    // Reset input so the same file can be re-uploaded if needed
+    e.target.value = ''
     const formData = new FormData()
     formData.append('file', file)
-    try { setUploadError(null); await uploadAsset.mutateAsync(formData) }
-    catch { setUploadError('Failed to upload file') }
+    try {
+      setUploadError(null)
+      setUploadSuccess(null)
+      await uploadAsset.mutateAsync(formData)
+      setUploadSuccess(`"${file.name}" uploaded successfully.`)
+    } catch {
+      setUploadError('Failed to upload file')
+    }
   }
 
   return (
@@ -73,6 +82,7 @@ export default function AssetsPage() {
         </Button>
         <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
       </div>
+      {uploadSuccess && <Alert variant="success"><AlertDescription>{uploadSuccess}</AlertDescription></Alert>}
       {uploadError && <Alert variant="destructive"><AlertDescription>{uploadError}</AlertDescription></Alert>}
       <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-40">
         <option value="">All Types</option>
@@ -96,8 +106,8 @@ export default function AssetsPage() {
                 <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-700 text-gray-400">
                   {getAssetIcon(asset.asset_type)}
                 </div>
-                <p className="truncate text-sm font-medium text-white">{asset.name}</p>
-                <p className="mt-1 text-xs text-gray-400">{asset.asset_type} · {formatFileSize(asset.file_size)}</p>
+                <p className="truncate text-sm font-medium text-white">{asset.name ?? asset.filename}</p>
+                <p className="mt-1 text-xs text-gray-400">{asset.asset_type} · {formatFileSize(asset.file_size ?? 0)}</p>
                 <p className="text-xs text-gray-500">{formatRelativeDate(asset.created_at)}</p>
                 <Button size="sm" variant="destructive" className="mt-3 w-full" onClick={() => deleteAsset.mutate(asset.id)} isLoading={deleteAsset.isPending}>
                   <Trash2 className="mr-1 h-3 w-3" />Delete
