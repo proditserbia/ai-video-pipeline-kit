@@ -3,6 +3,7 @@ import Link from 'next/link'
 import StatsCards from '@/components/dashboard/StatsCards'
 import { useJobs } from '@/hooks/useJobs'
 import JobStatusBadge from '@/components/jobs/JobStatusBadge'
+import JobThumbnail from '@/components/jobs/JobThumbnail'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { formatRelativeDate } from '@/lib/utils'
@@ -50,6 +51,7 @@ export default function DashboardPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-gray-700">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 w-14">Preview</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Title</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Created</th>
@@ -59,6 +61,17 @@ export default function DashboardPage() {
                 <tbody>
                   {jobs?.items?.map((job) => (
                     <tr key={job.id} className="border-b border-gray-700 last:border-0 hover:bg-gray-700/50">
+                      <td className="px-4 py-3 w-14">
+                        {job.thumbnail_url ? (
+                          <JobThumbnail
+                            jobId={job.id}
+                            className="h-14 w-8 rounded object-cover"
+                            alt={job.title}
+                          />
+                        ) : (
+                          <div className="h-14 w-8 rounded bg-gray-700" />
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-white">{job.title}</td>
                       <td className="px-4 py-3">
                         <JobStatusBadge status={job.status} />

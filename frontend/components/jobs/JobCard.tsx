@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import JobStatusBadge from './JobStatusBadge'
+import JobThumbnail from './JobThumbnail'
 import { formatRelativeDate } from '@/lib/utils'
 import { useRetryJob, useCancelJob } from '@/hooks/useJobs'
 import type { Job } from '@/types'
@@ -19,6 +20,15 @@ export default function JobCard({ job }: JobCardProps) {
   return (
     <Card>
       <CardContent className="p-4">
+        {job.thumbnail_url && (
+          <div className="mb-3 overflow-hidden rounded-md bg-gray-700">
+            <JobThumbnail
+              jobId={job.id}
+              className="h-32 w-full object-cover"
+              alt={job.title}
+            />
+          </div>
+        )}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="truncate font-medium text-white">{job.title}</h3>
