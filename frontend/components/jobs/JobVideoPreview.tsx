@@ -41,13 +41,15 @@ export default function JobVideoPreview({
   // Tracks whether we have already started a fetch so we don't duplicate it.
   const fetchStartedRef = useRef(false)
 
-  // Revoke the object URL when the component unmounts to prevent memory leaks.
+  // Revoke the object URL whenever it changes (and on unmount) to prevent
+  // memory leaks.  Because blobUrl transitions null → URL at most once per
+  // component instance, this effect runs at most twice: once with null (no-op)
+  // and once on unmount with the actual URL.
   useEffect(() => {
     return () => {
       if (blobUrl) URL.revokeObjectURL(blobUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [blobUrl])
 
   const handleMouseEnter = useCallback(() => {
     if (!enabled) return

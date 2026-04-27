@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import textwrap
 
 
@@ -22,7 +23,6 @@ def generate_scene_prompts(script_text: str, count: int) -> list[str]:
         return [_cinematic("abstract cinematic background, dramatic lighting")] * count
 
     # Split into sentences on common terminators.
-    import re
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", script_text.strip()) if s.strip()]
 
     if not sentences:
