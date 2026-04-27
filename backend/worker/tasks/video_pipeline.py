@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -173,6 +174,47 @@ def _resolve_brand_assets(db, input_data: dict, job) -> tuple:
     return watermark_id, _asset_path(watermark_id), bg_music_id, _asset_path(bg_music_id)
 
 
+def _concat_audio_files(parts: list[Path], output: Path) -> None:
+    """Concatenate *parts* audio files into *output* using the FFmpeg concat demuxer.
+
+    All inputs must share the same codec (e.g. MP3→MP3) for stream-copy to
+    work correctly.  The output file is overwritten if it already exists.
+
+    Args:
+        parts:  Ordered list of source audio paths.
+        output: Destination path for the concatenated audio.
+
+    Raises:
+        RuntimeError: If the FFmpeg command exits with a non-zero return code.
+    """
+    import uuid as _uuid
+
+    list_file = output.parent / f"_concat_{output.stem}_{_uuid.uuid4().hex}.txt"
+    list_file.write_text(
+        "\n".join(f"file '{str(p)}'" for p in parts),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(list_file),
+            "-c", "copy",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        try:
+            list_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if result.returncode != 0:
+        raise RuntimeError(f"Audio concatenation failed: {result.stderr[:500]}")
+
+
 @celery_app.task(bind=True, name="worker.tasks.video_pipeline.run_video_pipeline")
 def run_video_pipeline(self, job_id: str) -> dict:
     """
@@ -258,51 +300,68 @@ def run_video_pipeline(self, job_id: str) -> dict:
         # Accumulated warnings for result_quality classification at Step 10.
         _warnings: list[str] = []
 
+        # Determine early whether the AI paragraph-sync path will be used so
+        # that Step 4 can skip generating a wasteful full-script TTS file.
+        _ai_paragraph_sync: bool = (
+            flags.is_enabled("stock_media")
+            and (settings.MEDIA_MODE or "stock").lower() == "ai"
+            and settings.AI_IMAGE_ENABLED
+        )
+
         # ── Step 4: TTS ────────────────────────────────────────────────
         audio_path: Path | None = None
         if flags.is_enabled("tts"):
-            _append_log(db, job, "Synthesising TTS audio")
-            voice = _resolve_voice(input_data)
             audio_out = work_dir / "voice.mp3"
-            if not job.dry_run:
-                from worker.modules.tts.selector import get_tts_provider, get_tts_provider_name
-                tts_provider = get_tts_provider()
-                _append_log(db, job, f"TTS provider selected: {get_tts_provider_name(tts_provider)}")
-                if tts_provider is not None:
-                    try:
-                        _run_async(tts_provider.synthesize(script_text, voice, str(audio_out)))
-                        audio_path = audio_out
-                        _append_log(db, job, f"TTS audio: {audio_path}")
+            if _ai_paragraph_sync and not job.dry_run:
+                # Per-block TTS will be generated in Step 5 (AI paragraph-sync
+                # mode).  Generating a full-script file here would be redundant.
+                _append_log(
+                    db, job,
+                    "TTS deferred: per-block TTS will run in AI paragraph-sync mode",
+                )
+                log.info("tts_deferred_paragraph_sync")
+            else:
+                _append_log(db, job, "Synthesising TTS audio")
+                voice = _resolve_voice(input_data)
+                if not job.dry_run:
+                    from worker.modules.tts.selector import get_tts_provider, get_tts_provider_name
+                    tts_provider = get_tts_provider()
+                    _append_log(db, job, f"TTS provider selected: {get_tts_provider_name(tts_provider)}")
+                    if tts_provider is not None:
+                        try:
+                            _run_async(tts_provider.synthesize(script_text, voice, str(audio_out)))
+                            audio_path = audio_out
+                            _append_log(db, job, f"TTS audio: {audio_path}")
+                            job.output_metadata = {
+                                **(job.output_metadata or {}),
+                                "tts_status": "success",
+                            }
+                            db.commit()
+                        except Exception as tts_exc:
+                            tts_error = f"TTS provider {type(tts_provider).__name__} failed: {tts_exc}"
+                            _append_log(db, job, f"TTS warning: {tts_error} – continuing without audio")
+                            log.warning("tts_failed", provider=type(tts_provider).__name__, error=str(tts_exc))
+                            _warnings.append(tts_error)
+                            job.output_metadata = {
+                                **(job.output_metadata or {}),
+                                "tts_status": "failed",
+                                "tts_warning": tts_error,
+                            }
+                            db.commit()
+                    else:
+                        _append_log(db, job, "TTS skipped: no provider configured")
+                        log.warning("tts_skipped", reason="no_provider_configured")
+                        _tts_skip_msg = "TTS was skipped. No provider is configured. Video will render without voiceover."
+                        _warnings.append(_tts_skip_msg)
                         job.output_metadata = {
                             **(job.output_metadata or {}),
-                            "tts_status": "success",
-                        }
-                        db.commit()
-                    except Exception as tts_exc:
-                        tts_error = f"TTS provider {type(tts_provider).__name__} failed: {tts_exc}"
-                        _append_log(db, job, f"TTS warning: {tts_error} – continuing without audio")
-                        log.warning("tts_failed", provider=type(tts_provider).__name__, error=str(tts_exc))
-                        _warnings.append(tts_error)
-                        job.output_metadata = {
-                            **(job.output_metadata or {}),
-                            "tts_status": "failed",
-                            "tts_warning": tts_error,
+                            "tts_status": "skipped",
+                            "tts_warning": _tts_skip_msg,
                         }
                         db.commit()
                 else:
-                    _append_log(db, job, "TTS skipped: no provider configured")
-                    log.warning("tts_skipped", reason="no_provider_configured")
-                    _tts_skip_msg = "TTS was skipped. No provider is configured. Video will render without voiceover."
-                    _warnings.append(_tts_skip_msg)
-                    job.output_metadata = {
-                        **(job.output_metadata or {}),
-                        "tts_status": "skipped",
-                        "tts_warning": _tts_skip_msg,
-                    }
-                    db.commit()
-            else:
-                audio_path = audio_out
-                _append_log(db, job, f"TTS audio (dry run): {audio_path}")
+                    audio_path = audio_out
+                    _append_log(db, job, f"TTS audio (dry run): {audio_path}")
 
         # ── Step 5: Media (stock path or AI-image-timeline path) ───────
         media_clips: list[Path] = []
@@ -333,26 +392,18 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 )
 
                 if media_mode == "ai" and settings.AI_IMAGE_ENABLED:
-                    # ── New: script-scene-image-timeline path ──────────
+                    # ── Paragraph-level audio/image sync path ─────────────
                     _append_log(db, job, f"AI image pipeline enabled (provider={settings.AI_IMAGE_PROVIDER})")
                     log.info("ai_image_pipeline_start", provider=settings.AI_IMAGE_PROVIDER)
 
                     from worker.modules.ai_images.factory import get_ai_image_provider
-                    from worker.modules.script_planner.planner import plan_script_scenes
+                    from worker.modules.script_planner.planner import plan_narration_blocks
                     from worker.modules.video_builder.ffmpeg_builder import _probe_duration
                     from worker.modules.video_builder.visual_segment import VisualSegment
 
-                    # Probe audio duration for scene timing.
-                    audio_duration: float | None = None
-                    if audio_path and audio_path.exists():
-                        audio_duration = _probe_duration(audio_path)
-
-                    # Plan scenes from script.
-                    scenes = plan_script_scenes(
-                        script_text,
-                        audio_duration=audio_duration,
-                    )
-                    _append_log(db, job, f"Script planner: {len(scenes)} scenes (audio={audio_duration}s)")
+                    # Split script into semantic blocks (one TTS + one image each).
+                    blocks = plan_narration_blocks(script_text)
+                    _append_log(db, job, f"Narration blocks planned: {len(blocks)}")
 
                     # Instantiate the configured AI image provider once.
                     try:
@@ -367,54 +418,125 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     image_dir = media_dir / "ai_images"
                     image_dir.mkdir(exist_ok=True)
 
+                    # Resolve per-block TTS provider (same priority chain as Step 4).
+                    _block_voice = _resolve_voice(input_data)
+                    _block_tts = None
+                    if flags.is_enabled("tts"):
+                        from worker.modules.tts.selector import get_tts_provider as _get_tts
+                        _block_tts = _get_tts()
+
                     _scene_logs: list[dict] = []
                     _segments: list[VisualSegment] = []
+                    _voice_parts: list[Path] = []
+                    _cursor: float = 0.0
 
                     if ai_provider is not None:
-                        for scene in scenes:
-                            img_path = image_dir / f"scene_{scene.index:03d}.png"
+                        for block in blocks:
+                            # ── Per-block TTS ─────────────────────────────
+                            block_audio = work_dir / f"voice_{block.index:03d}.mp3"
+                            block_dur: float | None = None
+                            if _block_tts is not None:
+                                try:
+                                    _run_async(
+                                        _block_tts.synthesize(
+                                            block.text, _block_voice, str(block_audio)
+                                        )
+                                    )
+                                    block_dur = _probe_duration(block_audio)
+                                    block.audio_path = block_audio
+                                    _voice_parts.append(block_audio)
+                                except Exception as blk_tts_exc:
+                                    _warn = (
+                                        f"Per-block TTS failed for block "
+                                        f"{block.index}: {blk_tts_exc}"
+                                    )
+                                    _warnings.append(_warn)
+                                    log.warning(
+                                        "per_block_tts_failed",
+                                        block=block.index,
+                                        error=str(blk_tts_exc),
+                                    )
+                                    _append_log(db, job, _warn)
+
+                            # ── Per-block AI image ─────────────────────────
+                            img_path = image_dir / f"scene_{block.index:03d}.png"
                             try:
                                 generated = ai_provider.generate_image(
-                                    scene.image_prompt,
+                                    block.image_prompt,
                                     img_path,
                                     aspect_ratio=settings.AI_IMAGE_ASPECT_RATIO,
-                                    metadata={"scene_id": scene.id},
+                                    metadata={"block_id": block.id},
                                 )
+                                dur = block_dur if block_dur is not None else 5.0
+                                block.start_time = _cursor
+                                block.end_time = _cursor + dur
+                                block.duration = dur
+                                block.image_path = Path(generated.path)
+                                _cursor += dur
                                 seg = VisualSegment(
                                     path=Path(generated.path),
-                                    start_time=scene.start_time if scene.start_time is not None else 0.0,
-                                    end_time=scene.end_time if scene.end_time is not None else 0.0,
-                                    duration=scene.duration if scene.duration is not None else 5.0,
+                                    start_time=block.start_time,
+                                    end_time=block.end_time,
+                                    duration=dur,
                                     type="image",
-                                    scene_id=scene.id,
+                                    scene_id=block.id,
                                 )
                                 _segments.append(seg)
                                 _scene_logs.append({
-                                    "index": scene.index,
-                                    "text": scene.text,
-                                    "prompt": scene.image_prompt,
+                                    "index": block.index,
+                                    "text": block.text,
+                                    "prompt": block.image_prompt,
                                     "provider": generated.provider,
                                     "image_path": str(generated.path),
-                                    "start_time": scene.start_time,
-                                    "end_time": scene.end_time,
-                                    "duration": scene.duration,
+                                    "start_time": block.start_time,
+                                    "end_time": block.end_time,
+                                    "duration": dur,
+                                    "block_audio": (
+                                        str(block_audio)
+                                        if block_dur is not None
+                                        else None
+                                    ),
                                 })
                                 log.info(
-                                    "ai_image_scene_generated",
-                                    index=scene.index,
-                                    text=scene.text[:120],
-                                    prompt=scene.image_prompt,
+                                    "ai_image_block_generated",
+                                    index=block.index,
+                                    text=block.text[:120],
                                     provider=generated.provider,
-                                    image_path=str(generated.path),
-                                    start_time=scene.start_time,
-                                    end_time=scene.end_time,
-                                    duration=scene.duration,
+                                    duration=dur,
                                 )
                             except Exception as img_exc:
-                                _warn = f"AI image failed for scene {scene.index}: {img_exc}"
+                                _warn = f"AI image failed for block {block.index}: {img_exc}"
                                 _warnings.append(_warn)
-                                log.warning("ai_image_scene_failed", scene=scene.index, error=str(img_exc))
+                                log.warning(
+                                    "ai_image_block_failed",
+                                    block=block.index,
+                                    error=str(img_exc),
+                                )
                                 _append_log(db, job, _warn)
+
+                    # Concatenate per-block audio into voice.mp3, replacing any
+                    # full-script audio that may have been set in Step 4.
+                    if _voice_parts:
+                        concat_audio_path = work_dir / "voice.mp3"
+                        try:
+                            _concat_audio_files(_voice_parts, concat_audio_path)
+                            audio_path = concat_audio_path
+                            _append_log(
+                                db, job,
+                                f"Concatenated {len(_voice_parts)} block audio files"
+                                f" → {concat_audio_path}",
+                            )
+                            job.output_metadata = {
+                                **(job.output_metadata or {}),
+                                "tts_status": "success",
+                                "tts_block_count": len(_voice_parts),
+                            }
+                            db.commit()
+                        except Exception as concat_exc:
+                            _warn = f"Audio concatenation failed: {concat_exc}"
+                            _warnings.append(_warn)
+                            log.warning("audio_concat_failed", error=str(concat_exc))
+                            _append_log(db, job, _warn)
 
                     if _segments:
                         visual_segments = _segments
@@ -428,6 +550,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
                         "ai_image_provider": settings.AI_IMAGE_PROVIDER,
                         "scenes": _scene_logs,
                         "n_scenes": len(_scene_logs),
+                        "paragraph_sync": True,
                     }
                     db.commit()
                     _append_log(db, job, f"AI images: {len(_segments)} segments generated")
