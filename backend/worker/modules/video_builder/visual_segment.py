@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass
@@ -23,5 +24,5 @@ class VisualSegment:
     start_time: float
     end_time: float
     duration: float
-    type: str  # "image" | "video"
+    type: Literal["image", "video"]
     scene_id: str = ""

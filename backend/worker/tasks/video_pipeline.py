@@ -368,9 +368,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
                                 )
                                 seg = VisualSegment(
                                     path=Path(generated.path),
-                                    start_time=scene.start_time or 0.0,
-                                    end_time=scene.end_time or 0.0,
-                                    duration=scene.duration or 5.0,
+                                    start_time=scene.start_time if scene.start_time is not None else 0.0,
+                                    end_time=scene.end_time if scene.end_time is not None else 0.0,
+                                    duration=scene.duration if scene.duration is not None else 5.0,
                                     type="image",
                                     scene_id=scene.id,
                                 )
