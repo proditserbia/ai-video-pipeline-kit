@@ -174,3 +174,59 @@ export interface CredentialStatus {
   pixabay: boolean
   youtube: boolean
 }
+
+export interface AppSettingsMedia {
+  media_mode: string
+  ai_image_enabled: boolean
+  ai_image_provider: string
+  ai_image_aspect_ratio: string
+  paragraph_tts_sync_enabled: boolean
+  visual_shot_plan_enabled: boolean
+}
+
+export interface AppSettingsScript {
+  ai_script_enabled: boolean
+  provider: string
+}
+
+export interface AppSettingsTTS {
+  active_provider: string
+  openai_tts_available: boolean
+  edge_tts_available: boolean
+  coqui_available: boolean
+  elevenlabs_available: boolean
+  default_voice: string | null
+}
+
+export interface AppSettingsCaptions {
+  whisper_enabled: boolean
+  model_size: string
+  available_styles: string[]
+}
+
+export interface AppSettingsProviders {
+  openai_api_key_present: boolean
+  pexels_api_key_present: boolean
+  pixabay_api_key_present: boolean
+  stability_api_key_present: boolean
+  elevenlabs_api_key_present: boolean
+}
+
+export interface AppSettingsJobs {
+  max_retries: number
+  dry_run: boolean
+  default_ordering: string
+}
+
+export interface AppSettingsStatus {
+  app_name: string
+  environment: string
+  storage_path: string
+  media: AppSettingsMedia
+  script: AppSettingsScript
+  tts: AppSettingsTTS
+  captions: AppSettingsCaptions
+  providers: AppSettingsProviders
+  jobs: AppSettingsJobs
+  feature_flags: Record<string, boolean>
+}
