@@ -322,6 +322,9 @@ def run_video_pipeline(self, job_id: str) -> dict:
             _script_cfg: dict = {**input_data.get("script_settings", {})}
             if _prompt_instructions:
                 _script_cfg["instructions"] = _prompt_instructions
+            # Pass visual_tags so the script provider can inject subject constraints.
+            if _visual_tags:
+                _script_cfg["visual_tags"] = _visual_tags
             if settings.OPENAI_API_KEY:
                 try:
                     result = OpenAIScriptProvider().generate(

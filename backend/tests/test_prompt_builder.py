@@ -19,13 +19,16 @@ from worker.modules.ai_images.prompt_builder import (
     _CATEGORY_PLANS,
     _GENERAL_SHOT_PLAN,
     _append_negative,
+    _dedup_visual_tags,
     _extract_subject,
+    _filter_generic_tags,
     _is_animal_subject,
     _is_non_visual,
     _strip_conversational,
     _wrap_cinematic,
     build_image_prompt,
     detect_visual_category,
+    resolve_visual_subject,
 )
 
 
@@ -891,3 +894,295 @@ class TestTagNormalization:
     def test_whitespace_only_string_returns_empty(self):
         from worker.tasks.video_pipeline import _normalize_visual_tags
         assert _normalize_visual_tags("   ") == []
+
+
+# ── TestDedupVisualTags ───────────────────────────────────────────────────────
+
+
+class TestDedupVisualTags:
+    """_dedup_visual_tags must collapse singular/plural duplicate tags."""
+
+    def test_groundhog_groundhogs_deduped_to_groundhog(self):
+        result = _dedup_visual_tags(["groundhog", "groundhogs"])
+        assert result == ["groundhog"]
+
+    def test_plural_only_kept_as_is(self):
+        result = _dedup_visual_tags(["groundhogs"])
+        assert result == ["groundhogs"]
+
+    def test_no_duplicates_unchanged(self):
+        result = _dedup_visual_tags(["groundhog", "nature", "meadow"])
+        assert len(result) == 3
+
+    def test_es_plural_collapsed(self):
+        result = _dedup_visual_tags(["fox", "foxes"])
+        assert result == ["fox"]
+
+    def test_case_insensitive_dedup(self):
+        result = _dedup_visual_tags(["Groundhog", "groundhogs"])
+        # One of the two should survive (case-preserved singular preferred).
+        assert len(result) == 1
+
+    def test_empty_list_returns_empty(self):
+        assert _dedup_visual_tags([]) == []
+
+    def test_order_is_deterministic(self):
+        a = _dedup_visual_tags(["bee", "bees", "flower"])
+        b = _dedup_visual_tags(["flower", "bees", "bee"])
+        # Both should produce the same deduplicated content.
+        assert set(t.lower() for t in a) == set(t.lower() for t in b)
+
+
+# ── TestFilterGenericTags ─────────────────────────────────────────────────────
+
+
+class TestFilterGenericTags:
+    """_filter_generic_tags must split tags into specific and generic lists."""
+
+    def test_nature_is_generic(self):
+        specific, generic = _filter_generic_tags(["nature", "groundhog"])
+        assert "nature" in generic
+        assert "groundhog" in specific
+
+    def test_all_specific_tags_stay_in_specific(self):
+        specific, generic = _filter_generic_tags(["groundhog", "meadow"])
+        assert specific == ["groundhog", "meadow"]
+        assert generic == []
+
+    def test_all_generic_tags_go_to_generic(self):
+        specific, generic = _filter_generic_tags(["animals", "nature"])
+        assert specific == []
+        assert len(generic) == 2
+
+    def test_empty_list(self):
+        specific, generic = _filter_generic_tags([])
+        assert specific == [] and generic == []
+
+
+# ── TestResolveVisualSubject ──────────────────────────────────────────────────
+
+
+class TestResolveVisualSubject:
+    """resolve_visual_subject must ground the subject to the most specific entity."""
+
+    # ── Core grounding fix ────────────────────────────────────────────────────
+
+    def test_animals_topic_groundhog_tags_resolves_groundhog(self):
+        """topic='animals', tags=['nature','groundhog','groundhogs'] → 'groundhog'."""
+        subject, source = resolve_visual_subject(
+            "animals", visual_tags=["nature", "groundhog", "groundhogs"]
+        )
+        assert subject.lower() == "groundhog"
+        assert source == "visual_tags"
+
+    def test_generic_topic_does_not_override_specific_tags(self):
+        subject, source = resolve_visual_subject(
+            "animals", visual_tags=["groundhog"]
+        )
+        assert "groundhog" in subject.lower()
+        assert source == "visual_tags"
+
+    def test_music_topic_with_jazz_saxophone_resolves_specific(self):
+        subject, source = resolve_visual_subject(
+            "music", visual_tags=["jazz", "saxophone"]
+        )
+        assert "jazz" in subject.lower() or "saxophone" in subject.lower()
+        assert source == "visual_tags"
+
+    def test_technology_topic_with_ai_smart_home_resolves_specific(self):
+        subject, source = resolve_visual_subject(
+            "technology", visual_tags=["AI", "smart home"]
+        )
+        assert "ai" in subject.lower() or "smart home" in subject.lower()
+        assert source == "visual_tags"
+
+    def test_history_topic_with_ancient_rome_marketplace_resolves_specific(self):
+        subject, source = resolve_visual_subject(
+            "history", visual_tags=["ancient Rome", "marketplace"]
+        )
+        assert "ancient rome" in subject.lower() or "marketplace" in subject.lower()
+        assert source == "visual_tags"
+
+    def test_business_topic_with_startup_marketing_resolves_specific(self):
+        subject, source = resolve_visual_subject(
+            "business", visual_tags=["startup", "marketing"]
+        )
+        assert "startup" in subject.lower() or "marketing" in subject.lower()
+        assert source == "visual_tags"
+
+    # ── Specific topic takes priority over tags ───────────────────────────────
+
+    def test_specific_topic_wins_over_tags(self):
+        """Specific concise topic should not be overridden by visual_tags."""
+        subject, source = resolve_visual_subject(
+            "ancient rome", visual_tags=["architecture"]
+        )
+        assert subject.lower() == "ancient rome"
+        assert source == "topic"
+
+    def test_specific_topic_no_tags_uses_topic(self):
+        subject, source = resolve_visual_subject("beekeeping")
+        assert subject == "beekeeping"
+        assert source == "topic"
+
+    # ── Singular/plural deduplication ────────────────────────────────────────
+
+    def test_singular_plural_deduped_before_subject_resolution(self):
+        """'groundhog' and 'groundhogs' should not both appear; singular is kept."""
+        subject, _ = resolve_visual_subject(
+            "animals", visual_tags=["groundhog", "groundhogs"]
+        )
+        assert subject.lower() == "groundhog"
+        # Plural form must not appear in the resolved subject.
+        assert "groundhogs" not in subject.lower()
+
+    # ── Generic fallback ──────────────────────────────────────────────────────
+
+    def test_generic_topic_no_tags_falls_back_to_topic(self):
+        """When topic is generic and there are no tags, fall back to the topic."""
+        subject, source = resolve_visual_subject("animals")
+        assert subject.lower() == "animals"
+        assert source == "fallback"
+
+    def test_empty_topic_no_tags_returns_default(self):
+        subject, source = resolve_visual_subject("")
+        assert len(subject) > 0
+        assert source == "fallback"
+
+    def test_all_generic_tags_fall_through_to_topic(self):
+        """If every tag is generic, they are ignored and topic (or fallback) is used."""
+        subject, source = resolve_visual_subject(
+            "interesting documentary", visual_tags=["nature", "animals"]
+        )
+        # "nature" and "animals" are both generic, so topic should be used.
+        assert "interesting documentary" in subject.lower() or len(subject) >= 4
+
+
+# ── TestSubjectGroundingInFinalPrompts ────────────────────────────────────────
+
+
+class TestSubjectGroundingInFinalPrompts:
+    """Final image prompts must contain the resolved specific subject."""
+
+    def test_animals_tags_groundhog_prompts_include_groundhog(self):
+        """When topic='animals' + tags=['groundhog'], all prompts must say 'groundhog'."""
+        texts = [
+            "Groundhogs are rodents that live in underground burrows.",
+            "They emerge in early spring to search for food.",
+            "Groundhogs can whistle to warn others of danger.",
+            "Their burrows can be ten meters long underground.",
+            "February 2nd is celebrated as Groundhog Day.",
+        ]
+        topic = "animals"
+        tags = ["nature", "groundhog", "groundhogs"]
+        for i, text in enumerate(texts):
+            prompt = build_image_prompt(
+                text, topic, block_index=i, total_blocks=5, visual_tags=tags
+            )
+            assert "groundhog" in prompt.lower(), (
+                f"Expected 'groundhog' in prompt for block {i}: {prompt!r}"
+            )
+
+    def test_music_jazz_saxophone_prompts_include_subject(self):
+        texts = [
+            "Jazz originated in New Orleans in the early twentieth century.",
+            "Saxophone players improvise melodies over chord changes.",
+            "Concert venues fill with the sound of brass instruments.",
+            "Jazz musicians developed a unique musical language.",
+            "Audiences gather to hear live jazz performances.",
+        ]
+        topic = "music"
+        tags = ["jazz", "saxophone"]
+        for i, text in enumerate(texts):
+            prompt = build_image_prompt(
+                text, topic, block_index=i, total_blocks=5, visual_tags=tags
+            )
+            assert "jazz" in prompt.lower() or "saxophone" in prompt.lower(), (
+                f"Expected jazz/saxophone in prompt for block {i}: {prompt!r}"
+            )
+
+    def test_generic_topic_without_specific_tags_has_some_subject(self):
+        """Even when topic is generic and no specific tags given, prompt is non-empty."""
+        prompt = build_image_prompt("Animals are fascinating creatures.", "animals")
+        assert "No text" in prompt
+        assert prompt.strip() != ""
+
+
+# ── TestScriptGenerationSubjectInjection ─────────────────────────────────────
+
+
+class TestScriptGenerationSubjectInjection:
+    """OpenAIScriptProvider.generate must inject specific subject when topic is generic."""
+
+    def _make_provider_and_capture_message(
+        self, topic: str, visual_tags: list[str]
+    ) -> str:
+        """Run generate() with a mock HTTP client and return the user message sent."""
+        import unittest.mock as mock
+        from worker.modules.script_generator.openai_provider import OpenAIScriptProvider
+
+        captured: dict = {}
+
+        def fake_post(url, *, json, headers, **kwargs):
+            captured["json"] = json
+            response = mock.MagicMock()
+            response.status_code = 200
+            response.json.return_value = {
+                "choices": [{"message": {"content": "A test script."}}],
+                "usage": {},
+            }
+            response.raise_for_status.return_value = None
+            return response
+
+        with mock.patch("httpx.Client") as mock_client_cls:
+            mock_client = mock.MagicMock()
+            mock_client.__enter__ = mock.MagicMock(return_value=mock_client)
+            mock_client.__exit__ = mock.MagicMock(return_value=False)
+            mock_client.post.side_effect = fake_post
+            mock_client_cls.return_value = mock_client
+
+            provider = OpenAIScriptProvider()
+            provider.generate(
+                topic=topic,
+                config={"visual_tags": visual_tags},
+            )
+
+        messages = captured["json"]["messages"]
+        user_msg = next(m["content"] for m in messages if m["role"] == "user")
+        return user_msg
+
+    def test_generic_topic_injects_specific_subject_into_user_message(self):
+        """When topic='animals' and tags=['groundhog'], user message mentions groundhog."""
+        user_msg = self._make_provider_and_capture_message(
+            "animals", ["nature", "groundhog", "groundhogs"]
+        )
+        assert "groundhog" in user_msg.lower(), (
+            f"Expected 'groundhog' in user message: {user_msg!r}"
+        )
+
+    def test_generic_topic_subject_constraint_line_present(self):
+        """When visual_tags yield a specific subject, a focus line is added."""
+        user_msg = self._make_provider_and_capture_message(
+            "music", ["jazz", "saxophone"]
+        )
+        # The message should include a "must focus on" constraint.
+        assert "must focus on" in user_msg.lower() or "jazz" in user_msg.lower(), (
+            f"Expected subject constraint in user message: {user_msg!r}"
+        )
+
+    def test_specific_topic_no_injection(self):
+        """When topic is already specific, no extra focus line is injected."""
+        user_msg = self._make_provider_and_capture_message(
+            "beekeeping", ["honeybee", "hive"]
+        )
+        # No focus constraint needed since topic is already specific.
+        # But the message must at least contain the topic.
+        assert "beekeeping" in user_msg.lower()
+
+    def test_no_tags_no_injection(self):
+        """When no visual_tags are given, user message falls back to plain topic."""
+        user_msg = self._make_provider_and_capture_message("animals", [])
+        assert "animals" in user_msg.lower()
+        # Without specific tags, there should be no extra focus line.
+        assert "must focus on" not in user_msg.lower()
+

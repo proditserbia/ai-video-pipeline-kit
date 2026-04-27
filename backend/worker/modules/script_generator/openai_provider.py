@@ -33,16 +33,38 @@ class OpenAIScriptProvider(AbstractScriptProvider):
         model = cfg.get("model", "gpt-4o-mini")
         max_tokens = int(cfg.get("max_tokens", 512))
 
-        # Build user message: always include topic; append instructions when present.
+        # Resolve the specific visual subject so the script focuses on the
+        # right concrete entity even when the topic is a generic category.
+        from worker.modules.ai_images.prompt_builder import (
+            resolve_visual_subject,
+        )
+        visual_tags: list[str] | None = cfg.get("visual_tags") or None
+        if isinstance(visual_tags, str):
+            visual_tags = [t.strip() for t in visual_tags.split(",") if t.strip()]
+        resolved_subject, subject_source = resolve_visual_subject(
+            topic, visual_tags=visual_tags
+        )
+        subject_is_specific = subject_source == "visual_tags"
+
+        # Build user message: always include topic; append instructions when
+        # present; inject visual subject constraint when tags provide a more
+        # specific entity than the topic.
         instructions = cfg.get("instructions", "").strip()
+        parts: list[str] = [f"Topic: {topic}"]
+        if subject_is_specific:
+            parts.append(f"The video must focus on: {resolved_subject}.")
         if instructions:
-            user_message = (
-                f"Topic: {topic}\n\n"
-                f"Instructions: {instructions}\n\n"
-                "Generate a short narration script for a vertical social video."
-            )
-        else:
-            user_message = f"Topic: {topic}"
+            parts.append(f"Instructions: {instructions}")
+        parts.append("Generate a short narration script for a vertical social video.")
+        user_message = "\n\n".join(parts)
+
+        logger.info(
+            "script_generation_subject",
+            topic=topic,
+            resolved_visual_subject=resolved_subject,
+            subject_source=subject_source,
+            subject_injected=subject_is_specific,
+        )
 
         payload = {
             "model": model,
@@ -101,3 +123,4 @@ class OpenAIScriptProvider(AbstractScriptProvider):
         raise OpenAIRateLimitedError(
             f"OpenAI returned 429 after {MAX_ATTEMPTS} attempts"
         ) from last_exc
+

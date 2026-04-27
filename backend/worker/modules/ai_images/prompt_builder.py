@@ -93,6 +93,31 @@ CATEGORY_ABSTRACT: str = "abstract"
 CATEGORY_GENERAL: str = "general"  # fallback when no category matches
 
 # ---------------------------------------------------------------------------
+# Generic topic words that should NOT override specific visual_tags.
+# When the topic is one of these broad category labels and visual_tags contain
+# something more concrete, the tags win.
+# ---------------------------------------------------------------------------
+
+_GENERIC_TOPIC_WORDS: frozenset[str] = frozenset({
+    "animals", "animal", "nature",
+    "music",
+    "technology", "tech",
+    "business",
+    "history",
+    "health",
+    "travel",
+    "sports", "sport",
+    "education",
+    "science",
+    "abstract",
+    "motivation",
+    "tips", "facts",
+    "explainer",
+    "video", "content",
+    "story", "guide",
+})
+
+# ---------------------------------------------------------------------------
 # Per-category keyword sets used by detect_visual_category.
 # ---------------------------------------------------------------------------
 
@@ -648,6 +673,132 @@ _ANTI_REPETITION_SUFFIX = (
 
 
 # ---------------------------------------------------------------------------
+# Subject grounding helpers
+# ---------------------------------------------------------------------------
+
+
+def _dedup_visual_tags(tags: list[str]) -> list[str]:
+    """Deduplicate tags, collapsing simple singular/plural pairs.
+
+    ``["groundhog", "groundhogs"]`` → ``["groundhog"]``
+
+    The shorter (singular) form is kept.  Order among non-duplicate tags is
+    preserved (shortest first due to the sort, which naturally keeps the
+    canonical singular).
+    """
+    # Sort by length so the singular form (shorter) is processed first.
+    sorted_tags = sorted(tags, key=len)
+    result: list[str] = []
+    seen_lower: set[str] = set()
+    for tag in sorted_tags:
+        lower = tag.lower().strip()
+        if not lower or lower in seen_lower:
+            continue
+        # Drop this tag if it is the plural of an already-accepted tag.
+        is_plural = any(
+            lower == existing + "s" or lower == existing + "es"
+            for existing in seen_lower
+        )
+        if not is_plural:
+            result.append(tag.strip())
+            seen_lower.add(lower)
+    return result
+
+
+def _filter_generic_tags(
+    tags: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split *tags* into ``(specific, generic)`` lists.
+
+    A tag is considered *generic* when its lower-case value matches one of
+    the known broad category labels in :data:`_GENERIC_TOPIC_WORDS`.
+    """
+    specific: list[str] = []
+    generic: list[str] = []
+    for tag in tags:
+        if tag.lower().strip() in _GENERIC_TOPIC_WORDS:
+            generic.append(tag)
+        else:
+            specific.append(tag)
+    return specific, generic
+
+
+def resolve_visual_subject(
+    topic: str,
+    visual_tags: list[str] | None = None,
+    block_text: str = "",
+) -> tuple[str, str]:
+    """Resolve the most specific concrete visual subject available.
+
+    The fix for generic-topic grounding: when the *topic* is a broad category
+    label (e.g. ``"animals"``, ``"music"``) and *visual_tags* contain a more
+    concrete entity, the tags win.  When the topic is already specific (e.g.
+    ``"ancient rome"``, ``"beekeeping"``), the topic takes priority as before.
+
+    Priority:
+    1. Specific (non-generic) *visual_tags* **when topic is generic or absent**.
+    2. *topic* when it is concise (≤ 5 words) and not a generic category
+       label.
+    3. Specific *visual_tags* even when topic is specific but too long to use
+       (> 5 words).
+    4. A noun phrase extracted from *block_text*.
+    5. *topic* of any length as a fallback (even if generic).
+    6. ``"abstract cinematic scene"`` (last resort).
+
+    Returns:
+        ``(subject, source)`` where *source* is one of
+        ``"visual_tags"``, ``"topic"``, ``"block_text"``, or
+        ``"fallback"``.
+    """
+    tags = _dedup_visual_tags(list(visual_tags or []))
+    specific_tags, ignored_generic = _filter_generic_tags(tags)
+
+    if ignored_generic:
+        logger.debug(
+            "ignored_generic_terms",
+            ignored=ignored_generic,
+            specific_kept=specific_tags,
+        )
+
+    stripped_topic = topic.strip()
+    topic_lower = stripped_topic.lower()
+    topic_is_generic = topic_lower in _GENERIC_TOPIC_WORDS
+
+    # 1. Specific visual_tags win when topic is generic or absent — this is
+    #    the core grounding fix: "animals" + ["groundhog"] → "groundhog".
+    if specific_tags and (topic_is_generic or not stripped_topic):
+        subject = specific_tags[0] if len(specific_tags) == 1 else " ".join(specific_tags[:2])
+        return subject, "visual_tags"
+
+    # 2. Topic when concise and specific (not a broad category label).
+    topic_words = stripped_topic.split()
+    is_concise = bool(stripped_topic) and len(topic_words) <= 5
+    is_specific = not topic_is_generic
+    if is_concise and is_specific and len(stripped_topic) >= _MIN_SUBJECT_LENGTH:
+        return stripped_topic, "topic"
+
+    # 3. Specific visual_tags as secondary option when topic is long.
+    if specific_tags:
+        subject = specific_tags[0] if len(specific_tags) == 1 else " ".join(specific_tags[:2])
+        return subject, "visual_tags"
+
+    # 4. Extract a noun phrase from block_text.
+    if block_text:
+        cleaned = _strip_conversational(block_text)
+        first_sentence = re.split(r"[.!?]", cleaned)[0].strip()
+        words = first_sentence.split()[:_SUBJECT_MAX_WORDS]
+        phrase = " ".join(words).strip(".,!?")
+        if len(phrase) >= _MIN_SUBJECT_LENGTH:
+            return phrase, "block_text"
+
+    # 5. Fallback: use topic even if generic (better than nothing).
+    if stripped_topic:
+        return stripped_topic, "fallback"
+
+    return "abstract cinematic scene", "fallback"
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -777,7 +928,9 @@ def _build_shot_plan_prompt(
     """Build a shot-plan prompt for *scene_text* at position *block_index*."""
     category = detect_visual_category(topic, scene_text, visual_tags=visual_tags)
     plan = _CATEGORY_PLANS.get(category, _CATEGORY_PLANS[CATEGORY_GENERAL])
-    subject = _extract_subject(scene_text, topic, visual_tags=visual_tags)
+    subject, subject_source = resolve_visual_subject(
+        topic, visual_tags=visual_tags, block_text=scene_text
+    )
     shot_idx = block_index % len(plan)
     shot_type, template = plan[shot_idx]
 
@@ -789,10 +942,20 @@ def _build_shot_plan_prompt(
         total_blocks=total_blocks,
         detected_visual_category=category,
         shot_type=shot_type,
-        subject=subject,
+        resolved_visual_subject=subject,
+        subject_source=subject_source,
         visual_tags=visual_tags or [],
         final_visual_prompt=visual_core,
     )
+
+    # Warn when the resolved subject does not appear in the final prompt.
+    if subject and subject.lower() not in visual_core.lower():
+        logger.warning(
+            "visual_prompt_subject_missing",
+            resolved_visual_subject=subject,
+            subject_source=subject_source,
+            final_visual_prompt=visual_core,
+        )
 
     prompt = _append_negative(visual_core)
     return f"{prompt} {_ANTI_REPETITION_SUFFIX}"
@@ -805,39 +968,18 @@ def _extract_subject(
 ) -> str:
     """Return the visual subject to use in a shot-plan template.
 
-    Priority:
-    1. *topic* hint when it is a concise phrase (≤ 5 words).
-    2. A brief noun phrase extracted from the cleaned scene text.
-    3. First *visual_tag* as an additional subject hint when text extraction
-       yields nothing useful.
+    Delegates to :func:`resolve_visual_subject` which applies strong subject
+    grounding: specific *visual_tags* always win over generic category topics.
+
+    Priority (via :func:`resolve_visual_subject`):
+    1. Specific (non-generic) *visual_tags*.
+    2. *topic* when concise and not a generic category label.
+    3. Noun phrase extracted from *scene_text*.
     4. *topic* (any length) as a fallback.
     5. ``"abstract cinematic scene"`` as a last resort.
     """
-    stripped_topic = topic.strip()
-    is_concise = bool(stripped_topic) and len(stripped_topic.split()) <= 5
-    is_long_enough = len(stripped_topic) >= _MIN_SUBJECT_LENGTH
-    if is_concise and is_long_enough:
-        return stripped_topic
-
-    # Extract a subject from the scene text regardless of its raw length.
-    cleaned = _strip_conversational(scene_text)
-    first_sentence = re.split(r"[.!?]", cleaned)[0].strip()
-    words = first_sentence.split()[:_SUBJECT_MAX_WORDS]
-    subject = " ".join(words).strip(".,!?")
-
-    if len(subject) >= _MIN_SUBJECT_LENGTH:
-        return subject
-
-    # Try the first visual tag as a subject hint.
-    if visual_tags:
-        tag_subject = visual_tags[0].strip()
-        if len(tag_subject) >= _MIN_SUBJECT_LENGTH:
-            return tag_subject
-
-    # Nothing useful extracted from the text; fall back to topic or default.
-    if stripped_topic:
-        return stripped_topic
-    return "abstract cinematic scene"
+    subject, _ = resolve_visual_subject(topic, visual_tags=visual_tags, block_text=scene_text)
+    return subject
 
 
 def _is_animal_subject(subject: str) -> bool:
