@@ -252,8 +252,9 @@ def rewrite_scene(
         )
         return scene
 
-    # Strip negative-prompt leakage from the LLM output.  Use a word-boundary
-    # aware pattern so we don't leave orphaned fragments.
+    # Strip phrases that look like negative-prompt instructions accidentally
+    # included by the LLM (e.g. "No text, no captions.").  These belong in the
+    # separate negative_prompt field, not in the visual_description.
     new_desc = re.sub(
         r"(?i)\b(no text|no captions|no subtitles|no typography|no logos|"
         r"no signs|no labels|no speech bubbles|no readable)\b[^,;.]*[,;.]?\s*",
@@ -333,6 +334,7 @@ def validate_and_improve_storyboard(
         best = scene
         best_score = initial_score
         rewritten = False
+        attempts_made = 0
 
         for attempt in range(1, max_retries + 1):
             candidate = rewrite_scene(best, topic, visual_tags, full_script)
@@ -352,12 +354,9 @@ def validate_and_improve_storyboard(
                 best_score = candidate_score
                 rewritten = True
 
+            attempts_made = attempt
             if best_score >= threshold and not is_generic_scene(best):
                 break
-
-        # `attempt` holds the last loop iteration index (loop always runs at
-        # least once when we reach this point).
-        attempts_made = attempt  # noqa: F821 — always set when loop ran
 
         if best_score < threshold or is_generic_scene(best):
             logger.warning(
