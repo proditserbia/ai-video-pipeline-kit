@@ -37,7 +37,11 @@ class StockMediaSelector:
         if settings.PEXELS_API_KEY:
             from worker.modules.stock_media.pexels_provider import PexelsProvider
 
-            assets = PexelsProvider().fetch(query, count, output_dir)
+            try:
+                assets = PexelsProvider().fetch(query, count, output_dir)
+            except Exception as exc:
+                logger.error("stock_media_pexels_unexpected_error", error=str(exc), query=query)
+                assets = []
             if assets:
                 logger.info("stock_media_provider_used", provider="pexels", clips=len(assets), query=query)
                 return assets, "pexels"
