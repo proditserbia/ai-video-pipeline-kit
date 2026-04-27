@@ -304,91 +304,190 @@ def run_video_pipeline(self, job_id: str) -> dict:
                 audio_path = audio_out
                 _append_log(db, job, f"TTS audio (dry run): {audio_path}")
 
-        # ── Step 5: Stock media ────────────────────────────────────────
+        # ── Step 5: Media (stock path or AI-image-timeline path) ───────
         media_clips: list[Path] = []
+        # visual_segments is populated only when the new AI-image-timeline
+        # path is used (MEDIA_MODE=ai + AI_IMAGE_ENABLED=True).
+        visual_segments: list | None = None
+
         if flags.is_enabled("stock_media"):
-            _append_log(db, job, "Fetching stock media")
+            _append_log(db, job, "Fetching media")
             if not job.dry_run:
                 media_dir = work_dir / "media"
                 media_dir.mkdir(exist_ok=True)
-                from worker.modules.stock_media.selector import StockMediaSelector
 
-                # Build search query from script text → topic → job title
-                search_query = (
-                    script_text
-                    or _resolve_topic(input_data)
-                    or job.title
-                )
-                log.info("stock_media_query", query=search_query, media_mode=settings.MEDIA_MODE)
-                _append_log(db, job, f"Stock media search query: {search_query!r} (mode={settings.MEDIA_MODE})")
-                selector = StockMediaSelector()
-                assets, stock_provider = selector.fetch(
-                    query=search_query,
-                    count=3,
-                    output_dir=str(media_dir),
-                )
-                media_clips = [Path(a.path) for a in assets]
-                clip_paths = [str(p) for p in media_clips]
-                log.info(
-                    "stock_media_selected",
-                    provider=stock_provider,
-                    query=search_query,
-                    clips=len(clip_paths),
-                    paths=clip_paths,
-                )
-                _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider!r}")
-                if clip_paths:
-                    _append_log(db, job, f"Downloaded clips: {', '.join(clip_paths)}")
+                media_mode = (settings.MEDIA_MODE or "stock").lower()
 
-                # Classify media_source for metadata.
-                _ai_providers = {"openai", "stability"}
-                if stock_provider in _ai_providers:
-                    _media_source = "ai"
-                elif stock_provider == "placeholder":
-                    _media_source = "placeholder"
-                else:
-                    _media_source = "stock"
+                if media_mode == "ai" and settings.AI_IMAGE_ENABLED:
+                    # ── New: script-scene-image-timeline path ──────────
+                    _append_log(db, job, f"AI image pipeline enabled (provider={settings.AI_IMAGE_PROVIDER})")
+                    log.info("ai_image_pipeline_start", provider=settings.AI_IMAGE_PROVIDER)
 
-                # Collect AI-specific metadata (prompts used, provider).
-                _prompts_used = [
-                    a.metadata.get("prompt")
-                    for a in assets
-                    if a.metadata.get("prompt")
-                ]
-                _ai_provider = (
-                    assets[0].metadata.get("ai_provider")
-                    if assets and assets[0].metadata.get("ai_provider")
-                    else None
-                )
+                    from worker.modules.ai_images.factory import get_ai_image_provider
+                    from worker.modules.script_planner.planner import plan_script_scenes
+                    from worker.modules.video_builder.ffmpeg_builder import _probe_duration
+                    from worker.modules.video_builder.visual_segment import VisualSegment
 
-                # Determine warning: Pexels was tried but returned nothing, or only placeholders
-                _stock_warn: str | None = None
-                if settings.PEXELS_API_KEY and stock_provider not in {"pexels"} | _ai_providers:
-                    _stock_warn = (
-                        f"Pexels key is set but Pexels returned no clips; "
-                        f"fell back to {stock_provider!r}."
+                    # Probe audio duration for scene timing.
+                    audio_duration: float | None = None
+                    if audio_path and audio_path.exists():
+                        audio_duration = _probe_duration(audio_path)
+
+                    # Plan scenes from script.
+                    scenes = plan_script_scenes(
+                        script_text,
+                        audio_duration=audio_duration,
                     )
-                    log.warning("stock_media_pexels_fallback", fallback_provider=stock_provider)
-                elif stock_provider == "placeholder":
-                    _stock_warn = "Stock media: no real clips available. Placeholder visuals were used."
-                if _stock_warn:
-                    _warnings.append(_stock_warn)
+                    _append_log(db, job, f"Script planner: {len(scenes)} scenes (audio={audio_duration}s)")
 
-                _stock_meta: dict = {
-                    "stock_provider": stock_provider,
-                    "media_source": _media_source,
-                    "stock_query": search_query,
-                    "stock_clips": clip_paths,
-                    "clip_sources": [a.source for a in assets],
-                }
-                if _ai_provider:
-                    _stock_meta["ai_provider"] = _ai_provider
-                if _prompts_used:
-                    _stock_meta["prompts_used"] = _prompts_used
-                if _stock_warn:
-                    _stock_meta["stock_warning"] = _stock_warn
-                job.output_metadata = {**(job.output_metadata or {}), **_stock_meta}
-                db.commit()
+                    # Instantiate the configured AI image provider once.
+                    try:
+                        ai_provider = get_ai_image_provider()
+                        ai_provider_name = type(ai_provider).__name__
+                    except Exception as prov_exc:
+                        _warnings.append(f"AI image provider unavailable: {prov_exc}")
+                        log.warning("ai_image_provider_unavailable", error=str(prov_exc))
+                        ai_provider = None
+                        ai_provider_name = "none"
+
+                    image_dir = media_dir / "ai_images"
+                    image_dir.mkdir(exist_ok=True)
+
+                    _scene_logs: list[dict] = []
+                    _segments: list[VisualSegment] = []
+
+                    if ai_provider is not None:
+                        for scene in scenes:
+                            img_path = image_dir / f"scene_{scene.index:03d}.png"
+                            try:
+                                generated = ai_provider.generate_image(
+                                    scene.image_prompt,
+                                    img_path,
+                                    aspect_ratio=settings.AI_IMAGE_ASPECT_RATIO,
+                                    metadata={"scene_id": scene.id},
+                                )
+                                seg = VisualSegment(
+                                    path=Path(generated.path),
+                                    start_time=scene.start_time or 0.0,
+                                    end_time=scene.end_time or 0.0,
+                                    duration=scene.duration or 5.0,
+                                    type="image",
+                                    scene_id=scene.id,
+                                )
+                                _segments.append(seg)
+                                _scene_logs.append({
+                                    "index": scene.index,
+                                    "text": scene.text,
+                                    "prompt": scene.image_prompt,
+                                    "provider": generated.provider,
+                                    "image_path": str(generated.path),
+                                    "start_time": scene.start_time,
+                                    "end_time": scene.end_time,
+                                    "duration": scene.duration,
+                                })
+                            except Exception as img_exc:
+                                _warn = f"AI image failed for scene {scene.index}: {img_exc}"
+                                _warnings.append(_warn)
+                                log.warning("ai_image_scene_failed", scene=scene.index, error=str(img_exc))
+                                _append_log(db, job, _warn)
+
+                    if _segments:
+                        visual_segments = _segments
+                    else:
+                        _warnings.append("AI image generation produced no images; falling back to placeholder.")
+                        log.warning("ai_image_no_segments_produced")
+
+                    job.output_metadata = {
+                        **(job.output_metadata or {}),
+                        "media_source": "ai",
+                        "ai_provider": ai_provider_name,
+                        "ai_image_provider": settings.AI_IMAGE_PROVIDER,
+                        "scenes": _scene_logs,
+                        "n_scenes": len(_scene_logs),
+                    }
+                    db.commit()
+                    _append_log(db, job, f"AI images: {len(_segments)} segments generated")
+
+                else:
+                    # ── Existing: stock / hybrid / local path ──────────
+                    from worker.modules.stock_media.selector import StockMediaSelector
+
+                    # Build search query from script text → topic → job title
+                    search_query = (
+                        script_text
+                        or _resolve_topic(input_data)
+                        or job.title
+                    )
+                    log.info("stock_media_query", query=search_query, media_mode=settings.MEDIA_MODE)
+                    _append_log(db, job, f"Stock media search query: {search_query!r} (mode={settings.MEDIA_MODE})")
+                    selector = StockMediaSelector()
+                    assets, stock_provider = selector.fetch(
+                        query=search_query,
+                        count=3,
+                        output_dir=str(media_dir),
+                    )
+                    media_clips = [Path(a.path) for a in assets]
+                    clip_paths = [str(p) for p in media_clips]
+                    log.info(
+                        "stock_media_selected",
+                        provider=stock_provider,
+                        query=search_query,
+                        clips=len(clip_paths),
+                        paths=clip_paths,
+                    )
+                    _append_log(db, job, f"Stock media: {len(media_clips)} clips from {stock_provider!r}")
+                    if clip_paths:
+                        _append_log(db, job, f"Downloaded clips: {', '.join(clip_paths)}")
+
+                    # Classify media_source for metadata.
+                    _ai_providers = {"openai", "stability"}
+                    if stock_provider in _ai_providers:
+                        _media_source = "ai"
+                    elif stock_provider == "placeholder":
+                        _media_source = "placeholder"
+                    else:
+                        _media_source = "stock"
+
+                    # Collect AI-specific metadata (prompts used, provider).
+                    _prompts_used = [
+                        a.metadata.get("prompt")
+                        for a in assets
+                        if a.metadata.get("prompt")
+                    ]
+                    _ai_provider = (
+                        assets[0].metadata.get("ai_provider")
+                        if assets and assets[0].metadata.get("ai_provider")
+                        else None
+                    )
+
+                    # Determine warning: Pexels was tried but returned nothing, or only placeholders
+                    _stock_warn: str | None = None
+                    if settings.PEXELS_API_KEY and stock_provider not in {"pexels"} | _ai_providers:
+                        _stock_warn = (
+                            f"Pexels key is set but Pexels returned no clips; "
+                            f"fell back to {stock_provider!r}."
+                        )
+                        log.warning("stock_media_pexels_fallback", fallback_provider=stock_provider)
+                    elif stock_provider == "placeholder":
+                        _stock_warn = "Stock media: no real clips available. Placeholder visuals were used."
+                    if _stock_warn:
+                        _warnings.append(_stock_warn)
+
+                    _stock_meta: dict = {
+                        "stock_provider": stock_provider,
+                        "media_source": _media_source,
+                        "stock_query": search_query,
+                        "stock_clips": clip_paths,
+                        "clip_sources": [a.source for a in assets],
+                    }
+                    if _ai_provider:
+                        _stock_meta["ai_provider"] = _ai_provider
+                    if _prompts_used:
+                        _stock_meta["prompts_used"] = _prompts_used
+                    if _stock_warn:
+                        _stock_meta["stock_warning"] = _stock_warn
+                    job.output_metadata = {**(job.output_metadata or {}), **_stock_meta}
+                    db.commit()
             else:
                 _append_log(db, job, "Stock media skipped (dry run)")
 
@@ -469,8 +568,7 @@ def run_video_pipeline(self, job_id: str) -> dict:
             if not job.dry_run:
                 from worker.modules.video_builder.ffmpeg_builder import FFmpegVideoBuilder
                 builder = FFmpegVideoBuilder()
-                builder.build(
-                    clips=media_clips,
+                _build_kwargs = dict(
                     audio_path=audio_path,
                     srt_path=srt_path,
                     output_path=output_path,
@@ -479,6 +577,16 @@ def run_video_pipeline(self, job_id: str) -> dict:
                     watermark_path=watermark_path,
                     bg_music_path=bg_music_path,
                 )
+                if visual_segments is not None:
+                    builder.build_from_segments(
+                        segments=visual_segments,
+                        **_build_kwargs,
+                    )
+                else:
+                    builder.build(
+                        clips=media_clips,
+                        **_build_kwargs,
+                    )
                 job.output_metadata = {
                     **(job.output_metadata or {}),
                     "caption_style": caption_style,
