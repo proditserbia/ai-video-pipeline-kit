@@ -767,8 +767,9 @@ def _extract_subject(scene_text: str, topic: str) -> str:
     3. *topic* (any length) as a fallback when the text is too short to use.
     4. ``"abstract cinematic scene"`` as a last resort.
     """
-    if topic and len(topic.strip().split()) <= 5 and len(topic.strip()) >= _MIN_SUBJECT_LENGTH:
-        return topic.strip()
+    stripped_topic = topic.strip()
+    if stripped_topic and len(stripped_topic.split()) <= 5 and len(stripped_topic) >= _MIN_SUBJECT_LENGTH:
+        return stripped_topic
 
     # Extract a subject from the scene text regardless of its raw length.
     cleaned = _strip_conversational(scene_text)
@@ -780,8 +781,8 @@ def _extract_subject(scene_text: str, topic: str) -> str:
         return subject
 
     # Nothing useful extracted from the text; fall back to topic or default.
-    if topic and topic.strip():
-        return topic.strip()
+    if stripped_topic:
+        return stripped_topic
     return "abstract cinematic scene"
 
 
