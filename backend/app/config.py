@@ -103,6 +103,35 @@ class Settings(BaseSettings):
     # "openai" | "none"
     AI_VISUAL_PLANNER_PROVIDER: str = "openai"
 
+    # ---------------------------------------------------------------------------
+    # Storyboard planning layer
+    # ---------------------------------------------------------------------------
+    # When STORYBOARD_PLANNER_ENABLED=True the pipeline uses a storyboard
+    # layer as the single source of truth for visual generation in AI mode:
+    #   narration blocks → storyboard scenes → image prompts → AI images
+    #
+    # When False the previous prompt_builder path is preserved unchanged.
+    # Default: False for backward compatibility.  Set True to activate.
+    STORYBOARD_PLANNER_ENABLED: bool = False
+
+    # LLM provider used to generate the storyboard.
+    # "openai" uses gpt-4o-mini (or STORYBOARD_MODEL if set).
+    # "none"   disables the LLM call and uses the deterministic fallback only.
+    STORYBOARD_PLANNER_PROVIDER: str = "openai"
+
+    # Model used for storyboard generation (must be a fast, cheap text model).
+    # Defaults to gpt-4o-mini which is the same model used by AI_VISUAL_PLANNER.
+    STORYBOARD_MODEL: str = "gpt-4o-mini"
+
+    # Minimum block duration (seconds) below which a block is merged into the
+    # previous storyboard scene rather than receiving its own image slot.
+    STORYBOARD_MIN_BLOCK_SECONDS: float = 3.0
+
+    # Enable in-memory storyboard caching within a single pipeline run.
+    # This prevents redundant LLM calls when the same script+tags are processed
+    # multiple times (e.g. retries).
+    STORYBOARD_CACHE_ENABLED: bool = True
+
     # Cloud storage (S3-compatible)
     S3_ENDPOINT_URL: str | None = None
     S3_ACCESS_KEY: str | None = None

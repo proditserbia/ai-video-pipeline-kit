@@ -338,16 +338,20 @@ def _merge_short_blocks(blocks: list[str]) -> list[str]:
     return result
 
 
+# Absolute minimum word count per block regardless of speaking rate.
+# Prevents over-merging when speech is slower than average (130 wpm).
+_MIN_BLOCK_WORDS_FLOOR: int = 5
+
+
 def _compute_min_block_words() -> int:
     """Derive the minimum word count per block from ``MIN_VISUAL_BLOCK_SECONDS``.
 
     Assumes an average speaking rate of ~130 words per minute.  A block with
     fewer words than this threshold is too short to justify its own image slot.
     """
-    # 130 wpm → ~2.17 words/sec.  Minimum floor is 5 words to avoid
-    # over-merging on slow speech.
+    # 130 wpm → ~2.17 words/sec.
     words_per_second = 130.0 / 60.0
-    return max(5, int(settings.MIN_VISUAL_BLOCK_SECONDS * words_per_second))
+    return max(_MIN_BLOCK_WORDS_FLOOR, int(settings.MIN_VISUAL_BLOCK_SECONDS * words_per_second))
 
 
 def _merge_ultra_short_text_blocks(blocks: list[str]) -> list[str]:

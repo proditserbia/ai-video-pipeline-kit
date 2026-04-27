@@ -733,6 +733,14 @@ _NON_LOCATION_CAPS: frozenset[str] = frozenset({
 })
 
 # Threshold below which a specificity score is flagged as too generic.
+# The score is 0–10 and accumulates from:
+#   +2 if the resolved subject appears in the prompt
+#   +1 per visual tag found in the prompt (capped at 2)
+#   +2 if a named location appears after a preposition ("in Punxsutawney")
+#   +1 if a named event appears (Groundhog Day, Super Bowl …)
+#   +1 if a season is mentioned (winter, spring …)
+#   +1 if a crowd term is present (crowd, spectators, audience …)
+# A score of 2 means only the subject is present — no event/tag/location context.
 _SPECIFICITY_WARNING_THRESHOLD: int = 2
 
 
